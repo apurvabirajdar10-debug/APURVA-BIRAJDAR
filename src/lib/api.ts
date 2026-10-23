@@ -292,4 +292,24 @@ export const api = {
   // Offline Trip Pack
   getOfflinePack: (tripId: number) =>
     request<{ pack: OfflineTripPack }>(`/trips/${tripId}/offline-pack`),
+
+  // Disruption Replanner
+  replanDisruption: (tripId: number, params: { disruptionType: string; affectedDate?: string; affectedCity?: string; note?: string }) =>
+    request<{ proposal: import('../types/travel').DisruptionProposal }>(`/trips/${tripId}/disruption-replan`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
+  applyDisruptionReplan: (tripId: number, params: { changes: import('../types/travel').DisruptionProposalChange[]; affectedDate?: string }) =>
+    request<{ trip: Trip; message: string }>(`/trips/${tripId}/apply-replan`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
+  // Budget Swaps
+  applyBudgetSwap: (tripId: number, params: { originalActivityId: number; suggestedTitle: string; suggestedCost: number; category?: string; description?: string }) =>
+    request<{ trip: Trip; message: string }>(`/trips/${tripId}/budget-swap`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
 };

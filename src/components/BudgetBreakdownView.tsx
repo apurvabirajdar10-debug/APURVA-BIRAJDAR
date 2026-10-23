@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { BudgetMeter } from './BudgetMeter';
 import { SetBudgetModal } from './SetBudgetModal';
 import { TripMembersModal } from './TripMembersModal';
+import { BudgetSwapsWidget } from './BudgetSwapsWidget';
 
 interface BudgetBreakdownViewProps {
   trip: Trip;
@@ -600,6 +601,9 @@ export const BudgetBreakdownView: React.FC<BudgetBreakdownViewProps> = ({
               </div>
             </div>
           )}
+
+          {/* Smart Budget Swaps Component */}
+          <BudgetSwapsWidget trip={trip} onTripUpdated={onTripUpdated} />
 
           {/* Visual Charts & Category Breakdown */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -280,3 +280,148 @@ export interface OfflineTripPack {
   proposals?: ActivityProposal[];
 }
 
+export interface WeatherDayForecast {
+  date: string;
+  weatherCode: number;
+  condition: string;
+  tempMax: number;
+  tempMin: number;
+  rainProbability: number;
+  windSpeed: number;
+  icon: string;
+}
+
+export interface PackingItem {
+  id: string;
+  category: 'Essentials & Docs' | 'Weather Specific' | 'Clothing & Attire' | 'Electronics' | 'Health & Toiletries';
+  name: string;
+  checked: boolean;
+  isCustom?: boolean;
+  weatherHint?: string;
+}
+
+export interface DisruptionProposalChange {
+  type: 'replace' | 'reschedule' | 'swap' | 'indoor_alternative';
+  originalActivity: string;
+  newActivity: string;
+  timeSlot: 'morning' | 'afternoon' | 'evening';
+  reason: string;
+  costDiff: number; // e.g. -500 (cheaper) or +200
+}
+
+export interface DisruptionProposal {
+  disruptionType: 'rain' | 'delay' | 'closure' | 'heatwave';
+  disruptionLabel: string;
+  affectedDate: string;
+  affectedCity: string;
+  summary: string;
+  changes: DisruptionProposalChange[];
+  netCostDifference: number;
+  beforePlan: { timeSlot: string; activity: string; cost: number }[];
+  afterPlan: { timeSlot: string; activity: string; cost: number }[];
+}
+
+export interface HospitalInfo {
+  name: string;
+  city: string;
+  address: string;
+  phone: string;
+  emergencyDepartmentStatus: string; // e.g. "24/7 Level 1 Trauma & Emergency"
+  distanceKm: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+export interface NotificationItem {
+  id: string;
+  tripId?: number;
+  tripName?: string;
+  tier: 'critical' | 'helpful' | 'optional';
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+  actionTab?: string;
+}
+
+export interface NotificationSettings {
+  quietHoursEnabled: boolean;
+  quietHoursStart: string; // "22:00"
+  quietHoursEnd: string;   // "07:00"
+  allowCriticalInQuiet: boolean;
+  tiers: {
+    critical: boolean;
+    helpful: boolean;
+    optional: boolean;
+  };
+  tripToggles: Record<number, boolean>;
+}
+
+export interface BudgetSwapSuggestion {
+  id: string;
+  originalActivityId: number;
+  stopId: number;
+  originalTitle: string;
+  originalCost: number;
+  suggestedTitle: string;
+  suggestedCost: number;
+  savings: number;
+  category: string;
+  description: string;
+  rating: number;
+  reason: string;
+}
+
+export interface TravelReel {
+  id: string;
+  title: string;
+  city: string;
+  country: string;
+  mediaUrl: string;
+  mediaType: 'video' | 'image';
+  posterUrl?: string;
+  description: string;
+  tags: string[];
+  category: 'sightseeing' | 'food' | 'culture' | 'adventure' | 'relaxation' | 'shopping';
+  cost: number;
+  durationHours: number;
+  likes: number;
+  locationName: string;
+}
+
+export interface WishlistItem {
+  id: string;
+  destination: string;
+  country: string;
+  imageUrl: string;
+  targetBudget: number;
+  currentSaved: number;
+  targetDate: string; // YYYY-MM
+  notes?: string;
+  createdAt: string;
+}
+
+export interface VerifiedGuide {
+  id: string;
+  name: string;
+  city: string;
+  country: string;
+  avatarUrl: string;
+  isVerified: boolean;
+  badgeTitle: string;
+  rating: number;
+  reviewCount: number;
+  languages: string[];
+  feePerDay: number;
+  specialties: string[];
+  bio: string;
+  curatedSpots: {
+    title: string;
+    description: string;
+    category: 'sightseeing' | 'food' | 'culture' | 'adventure';
+    cost: number;
+    durationHours: number;
+    timeSlot: 'morning' | 'afternoon' | 'evening';
+  }[];
+}
+

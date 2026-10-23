@@ -1569,6 +1569,364 @@ ${tripContext}`;
 });
 
 /* ==========================================================================
+   DISRUPTION REPLANNER & BUDGET SWAP API ROUTES
+   ========================================================================== */
+
+// 4. POST /api/trips/:id/disruption-replan
+app.post('/api/trips/:id/disruption-replan', async (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    if (isNaN(tripId)) return res.status(400).json({ error: 'Invalid trip ID' });
+
+    const trip = dbOps.getTripById(tripId);
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+
+    const { disruptionType = 'rain', affectedDate, affectedCity, note } = req.body;
+
+    // Determine target date and city
+    let targetDate = affectedDate;
+    let targetCity = affectedCity;
+    let currentActivities: any[] = [];
+
+    const allActivities = trip.stops?.flatMap((s: any) =>
+      (s.activities || []).map((a: any) => ({ ...a, city_name: s.city_name, stop_id: s.id }))
+    ) || [];
+
+    if (!targetDate && allActivities.length > 0) {
+      targetDate = allActivities[0].date;
+      targetCity = allActivities[0].city_name;
+    } else if (!targetDate && trip.stops && trip.stops.length > 0) {
+      targetDate = trip.stops[0].start_date;
+      targetCity = trip.stops[0].city_name;
+    }
+
+    if (targetDate) {
+      currentActivities = allActivities.filter((a: any) => a.date === targetDate);
+    }
+    if (currentActivities.length === 0 && allActivities.length > 0) {
+      currentActivities = allActivities.slice(0, 3);
+      targetDate = currentActivities[0].date;
+      targetCity = currentActivities[0].city_name;
+    }
+
+    const beforePlan = currentActivities.map((a: any) => ({
+      timeSlot: a.time_slot || 'morning',
+      activity: a.title,
+      cost: a.cost || 0,
+    }));
+
+    // If beforePlan is empty, create a realistic baseline for simulation
+    if (beforePlan.length === 0) {
+      targetCity = targetCity || trip.stops?.[0]?.city_name || 'Destination';
+      targetDate = targetDate || trip.start_date || new Date().toISOString().split('T')[0];
+      beforePlan.push(
+        { timeSlot: 'morning', activity: `Open-Air Walking Tour of ${targetCity}`, cost: 1200 },
+        { timeSlot: 'afternoon', activity: `Scenic Park & Historic Market Promenade`, cost: 500 },
+        { timeSlot: 'evening', activity: `Rooftop Sunset Dining & Night Vista`, cost: 2400 }
+      );
+    }
+
+    // Try Gemini replanner if API key exists
+    let proposal: any = null;
+
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const prompt = `You are an expert travel contingency replanner for multi-city journeys.
+A travel disruption has occurred:
+- Trip: ${trip.name}
+- Disruption Type: ${disruptionType} (${disruptionType === 'rain' ? 'Heavy downpour/thunderstorms' : disruptionType === 'delay' ? 'Transit/flight delay by 4+ hours' : disruptionType === 'closure' ? 'Major attraction strike or emergency closure' : 'Severe heatwave warning'})
+- Affected City: ${targetCity || 'Current City'}
+- Affected Date: ${targetDate}
+- User Note: ${note || 'Re-route schedule for safety and comfort'}
+
+Current Before-Plan for this day:
+${JSON.stringify(beforePlan, null, 2)}
+
+Task:
+Generate a revised contingency plan.
+1. Propose structured adjustments (replace exposed outdoor activities with covered/indoor architectural marvels, world-class museums, food markets, or cooking classes; adjust timeslots if transit was delayed).
+2. Compare beforePlan vs afterPlan side by side.
+3. Quantify cost changes (+ or - INR).
+4. Provide a clear, calming executive summary explaining why the new schedule works better during this disruption.`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+          config: {
+            systemInstruction: 'Return ONLY valid JSON matching the schema for travel disruption replenishment.',
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                disruptionType: { type: Type.STRING },
+                disruptionLabel: { type: Type.STRING },
+                affectedDate: { type: Type.STRING },
+                affectedCity: { type: Type.STRING },
+                summary: { type: Type.STRING },
+                changes: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      type: { type: Type.STRING },
+                      originalActivity: { type: Type.STRING },
+                      newActivity: { type: Type.STRING },
+                      timeSlot: { type: Type.STRING },
+                      reason: { type: Type.STRING },
+                      costDiff: { type: Type.NUMBER },
+                    },
+                    required: ['type', 'originalActivity', 'newActivity', 'timeSlot', 'reason', 'costDiff'],
+                  },
+                },
+                beforePlan: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      timeSlot: { type: Type.STRING },
+                      activity: { type: Type.STRING },
+                      cost: { type: Type.NUMBER },
+                    },
+                    required: ['timeSlot', 'activity', 'cost'],
+                  },
+                },
+                afterPlan: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      timeSlot: { type: Type.STRING },
+                      activity: { type: Type.STRING },
+                      cost: { type: Type.NUMBER },
+                    },
+                    required: ['timeSlot', 'activity', 'cost'],
+                  },
+                },
+                netCostDifference: { type: Type.NUMBER },
+              },
+              required: ['disruptionType', 'disruptionLabel', 'affectedDate', 'affectedCity', 'summary', 'changes', 'beforePlan', 'afterPlan', 'netCostDifference'],
+            },
+          },
+        });
+
+        const reply = response.text;
+        if (reply) {
+          proposal = JSON.parse(reply);
+        }
+      } catch (geminiErr: any) {
+        console.warn('Gemini replanner fallback triggered:', geminiErr?.message);
+      }
+    }
+
+    // Heuristic Replanner Fallback (Ensures 100% reliability even when offline or no API key)
+    if (!proposal) {
+      if (disruptionType === 'rain') {
+        const changes = beforePlan.map((b, idx) => {
+          let newAct = `Indoor National Art Gallery & Heritage Hall`;
+          let reason = '100% sheltered indoor exhibition to avoid heavy rainfall.';
+          let costDiff = 200;
+          if (idx === 1) {
+            newAct = `Covered Artisanal Food Hall & Tasting Crawl`;
+            reason = 'Enjoy regional culinary delicacies inside protected covered archways.';
+            costDiff = 400;
+          } else if (idx === 2) {
+            newAct = `Historic Vaulted Cellar Dinner & Live Acoustic Music`;
+            reason = 'Cozy candlelit indoor dinner sheltered from storms.';
+            costDiff = -200;
+          }
+          return {
+            type: 'indoor_alternative' as const,
+            originalActivity: b.activity,
+            newActivity: newAct,
+            timeSlot: b.timeSlot as any,
+            reason,
+            costDiff,
+          };
+        });
+
+        const afterPlan = changes.map(c => ({
+          timeSlot: c.timeSlot,
+          activity: c.newActivity,
+          cost: Math.max(0, (beforePlan.find(b => b.timeSlot === c.timeSlot)?.cost || 1000) + c.costDiff),
+        }));
+
+        const netCostDifference = changes.reduce((acc, c) => acc + c.costDiff, 0);
+
+        proposal = {
+          disruptionType: 'rain',
+          disruptionLabel: 'Heavy Downpour & Thunderstorm Alert',
+          affectedDate: targetDate,
+          affectedCity: targetCity || 'Current Stop',
+          summary: `Severe rain forecast for ${targetCity} on ${targetDate}. Outdoor walking and exposed sightseeing replaced with dry, climate-controlled historic museums, covered market tastings, and subterranean cellar experiences.`,
+          changes,
+          beforePlan,
+          afterPlan,
+          netCostDifference,
+        };
+      } else if (disruptionType === 'delay') {
+        const changes = [
+          {
+            type: 'reschedule' as const,
+            originalActivity: beforePlan[0]?.activity || 'Morning Sightseeing Tour',
+            newActivity: 'Relaxed Arrival Check-in & Neighborhood Espresso Briefing',
+            timeSlot: 'morning' as const,
+            reason: 'Transit delayed by 3.5 hours: morning slots converted into buffer rest time.',
+            costDiff: -600,
+          },
+          {
+            type: 'swap' as const,
+            originalActivity: beforePlan[1]?.activity || 'Afternoon Landmark Pass',
+            newActivity: 'Twilight Express Fast-Track Highlight Tour',
+            timeSlot: 'afternoon' as const,
+            reason: 'Consolidated highlight pass ensuring key sights are still experienced.',
+            costDiff: 0,
+          },
+        ];
+
+        const afterPlan = [
+          { timeSlot: 'morning', activity: 'Relaxed Arrival Check-in & Neighborhood Espresso Briefing', cost: 200 },
+          { timeSlot: 'afternoon', activity: 'Twilight Express Fast-Track Highlight Tour', cost: beforePlan[1]?.cost || 1200 },
+          { timeSlot: 'evening', activity: beforePlan[2]?.activity || 'Evening Local Dining', cost: beforePlan[2]?.cost || 1800 },
+        ];
+
+        proposal = {
+          disruptionType: 'delay',
+          disruptionLabel: 'Transit & Flight Delay (3.5+ Hours)',
+          affectedDate: targetDate,
+          affectedCity: targetCity || 'Current Stop',
+          summary: `Flight/train arrival postponed by 3.5 hours. Morning schedule has been streamlined into rest buffer and hotel check-in, shifting key highlights into an evening twilight pass.`,
+          changes,
+          beforePlan,
+          afterPlan,
+          netCostDifference: -600,
+        };
+      } else {
+        // Closure or Heatwave
+        const changes = beforePlan.map((b) => ({
+          type: 'replace' as const,
+          originalActivity: b.activity,
+          newActivity: `Botanical Greenhouse & Architectural Heritage Pavilion`,
+          timeSlot: b.timeSlot as any,
+          reason: 'Verified open and climate-controlled alternative avoiding closed sites/extreme heat.',
+          costDiff: -150,
+        }));
+        proposal = {
+          disruptionType: 'closure',
+          disruptionLabel: 'Site Closure & Heatwave Re-route',
+          affectedDate: targetDate,
+          affectedCity: targetCity || 'Current Stop',
+          summary: `Primary venues temporarily inaccessible. Shifted to air-conditioned heritage pavilions and verified alternative cultural landmarks.`,
+          changes,
+          beforePlan,
+          afterPlan: changes.map(c => ({ timeSlot: c.timeSlot, activity: c.newActivity, cost: 850 })),
+          netCostDifference: -300,
+        };
+      }
+    }
+
+    return res.json({ proposal });
+  } catch (err: any) {
+    console.error('Disruption replanner error:', err);
+    return res.status(500).json({ error: 'Failed to generate disruption plan' });
+  }
+});
+
+// 5. POST /api/trips/:id/apply-replan
+app.post('/api/trips/:id/apply-replan', (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    if (isNaN(tripId)) return res.status(400).json({ error: 'Invalid trip ID' });
+
+    const trip = dbOps.getTripById(tripId);
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+
+    const { changes, affectedDate } = req.body;
+    if (!Array.isArray(changes) || changes.length === 0) {
+      return res.status(400).json({ error: 'No changes provided' });
+    }
+
+    // Find the stop containing the affected date
+    let targetStop = trip.stops?.find((s: any) =>
+      s.activities?.some((a: any) => a.date === affectedDate)
+    );
+    if (!targetStop && trip.stops && trip.stops.length > 0) {
+      targetStop = trip.stops[0];
+    }
+
+    if (!targetStop) {
+      return res.status(400).json({ error: 'No matching stop found for trip' });
+    }
+
+    // Apply changes to activities
+    for (const change of changes) {
+      const match = (targetStop.activities || []).find(
+        (a: any) => a.title === change.originalActivity || a.time_slot === change.timeSlot
+      );
+
+      if (match) {
+        dbOps.updateActivity(match.id, {
+          title: change.newActivity,
+          description: `Revised plan (${change.reason})`,
+          cost: Math.max(0, (match.cost || 0) + (change.costDiff || 0)),
+          category: change.type === 'indoor_alternative' ? 'culture' : match.category,
+        });
+      } else {
+        // Create new activity
+        dbOps.createActivity({
+          stop_id: targetStop.id,
+          trip_id: tripId,
+          title: change.newActivity,
+          description: change.reason,
+          date: affectedDate || targetStop.start_date,
+          time_slot: change.timeSlot || 'morning',
+          cost: Math.max(0, 1000 + (change.costDiff || 0)),
+          category: 'culture',
+          duration_hours: 2.5,
+          location: targetStop.city_name,
+          booking_status: 'planned',
+        });
+      }
+    }
+
+    const updatedTrip = dbOps.getTripById(tripId);
+    return res.json({ trip: updatedTrip, message: 'Disruption plan successfully applied to your itinerary!' });
+  } catch (err: any) {
+    console.error('Apply replan error:', err);
+    return res.status(500).json({ error: 'Failed to apply disruption plan' });
+  }
+});
+
+// 6. POST /api/trips/:id/budget-swap
+app.post('/api/trips/:id/budget-swap', (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    if (isNaN(tripId)) return res.status(400).json({ error: 'Invalid trip ID' });
+
+    const { originalActivityId, suggestedTitle, suggestedCost, category, description } = req.body;
+    if (!originalActivityId || !suggestedTitle) {
+      return res.status(400).json({ error: 'Activity ID and suggested title are required' });
+    }
+
+    const updated = dbOps.updateActivity(originalActivityId, {
+      title: suggestedTitle,
+      cost: suggestedCost || 0,
+      category: category || 'sightseeing',
+      description: description || 'Budget alternative swapped into itinerary',
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Activity not found' });
+    }
+
+    const updatedTrip = dbOps.getTripById(tripId);
+    return res.json({ trip: updatedTrip, message: `Successfully swapped to "${suggestedTitle}"!` });
+  } catch (err: any) {
+    console.error('Budget swap error:', err);
+    return res.status(500).json({ error: 'Failed to apply budget swap' });
+  }
+});
+
+/* ==========================================================================
    FRONTEND VITE & STATIC SERVING INTEGRATION
    ========================================================================== */
 
