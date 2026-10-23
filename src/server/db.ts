@@ -174,6 +174,7 @@ export function initDatabase() {
   }
 
   seedData();
+  seedCatalog();
 }
 
 // Cryptographic JWT Implementation (HMAC-SHA256)
@@ -366,9 +367,10 @@ function seedData() {
   insertExpense.run(trip2Id, osakaStopId, 'Cross Hotel Osaka (3 Nights)', 'stay', 33500, 'INR', '2026-10-11', 'Alex', 'Steps from Dotonbori');
   insertExpense.run(trip2Id, tokyoStopId, 'TeamLab & Shibuya Sky Tickets', 'activities', 4400, 'INR', '2026-10-05', 'Alex', 'Booked via app');
   insertExpense.run(trip2Id, null, 'Meals & Dining Budget', 'meals', 41000, 'INR', '2026-10-07', 'Alex', 'Mid-trip dining allocation');
+}
 
-  // 4. Seed Catalog of Global Activities & Cities for Search (Costs in INR)
-  const catalogItems = [
+// 4. Catalog of Global Activities & Cities for Search (Costs in INR)
+const CATALOG_ITEMS = [
     { id: 'cat-1', city_name: 'Paris', country: 'France', title: 'Eiffel Tower Summit by Night', description: 'Take the elevator to the top of Paris for breathtaking views of the illuminated City of Light.', category: 'sightseeing', cost: 2800, cost_index: 'moderate', duration_hours: 2.5, popularity: 99, image_url: 'https://images.unsplash.com/photo-1511739001486-6bfe10ce785f?auto=format&fit=crop&w=600&q=80', recommended_time: 'evening' },
     { id: 'cat-2', city_name: 'Paris', country: 'France', title: 'Pastry & Croissant Baking Masterclass', description: 'Learn secret French techniques to roll and bake flaky butter croissants from a master baker.', category: 'food', cost: 7600, cost_index: 'luxury', duration_hours: 3.0, popularity: 92, image_url: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?auto=format&fit=crop&w=600&q=80', recommended_time: 'morning' },
     { id: 'cat-3', city_name: 'Tokyo', country: 'Japan', title: 'Akihabara Retro Gaming & Anime Tour', description: 'Delve into multi-story arcade centers, rare vintage cartridges, and otaku culture with a local guide.', category: 'culture', cost: 3200, cost_index: 'moderate', duration_hours: 3.0, popularity: 88, image_url: 'https://images.unsplash.com/photo-1542051841857-5f90071e7989?auto=format&fit=crop&w=600&q=80', recommended_time: 'afternoon' },
@@ -405,12 +407,13 @@ function seedData() {
     { id: 'cat-32', city_name: 'Kochi', country: 'India', title: 'Alleppey Backwaters Houseboat Day Cruise', description: 'Drift past emerald paddy fields, coconut groves, and tranquil lagoons aboard a thatched Kerala kettuvallam.', category: 'relaxation', cost: 4200, cost_index: 'moderate', duration_hours: 4.5, popularity: 96, image_url: 'https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?auto=format&fit=crop&w=600&q=80', recommended_time: 'morning' },
   ];
 
+function seedCatalog() {
   const insertCatalog = db.prepare(`
-    INSERT INTO catalog (id, city_name, country, title, description, category, cost, cost_index, duration_hours, popularity, image_url, recommended_time)
+    INSERT OR IGNORE INTO catalog (id, city_name, country, title, description, category, cost, cost_index, duration_hours, popularity, image_url, recommended_time)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  for (const item of catalogItems) {
+  for (const item of CATALOG_ITEMS) {
     insertCatalog.run(
       item.id,
       item.city_name,
@@ -426,8 +429,6 @@ function seedData() {
       item.recommended_time
     );
   }
-
-  console.log('Seeded database successfully with INR values!');
 }
 
 // Database query helpers
