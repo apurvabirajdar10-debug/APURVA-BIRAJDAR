@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Train,
   Bus,
@@ -37,10 +37,12 @@ import {
   Info,
   Shield,
   Key,
-  ArrowLeftRight
+  ArrowLeftRight,
+  FileText
 } from 'lucide-react';
 import { Trip, Activity, Stop } from '../types/travel';
 import { api } from '../lib/api';
+import { BookingImportModal } from './BookingImportModal';
 
 interface BookingsViewProps {
   trips: Trip[];
@@ -159,6 +161,51 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
   const [activeTicketVoucher, setActiveTicketVoucher] = useState<ConfirmedBooking | null>(null);
   const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
   const [addToTripExpensesChecked, setAddToTripExpensesChecked] = useState(true);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  // Sync bookings from backend when activeTrip changes
+  useEffect(() => {
+    if (!activeTrip) return;
+    async function loadBackendBookings() {
+      try {
+        const res = await api.getBookings(activeTrip!.id);
+        if (res.bookings && res.bookings.length > 0) {
+          const mapped: ConfirmedBooking[] = res.bookings.map((b: any) => ({
+            id: b.id || `BK-${Math.floor(1000 + Math.random() * 9000)}`,
+            type: (b.type === 'hotel' ? 'stay' : b.type === 'rental_car' ? 'vehicle' : b.type) || 'train',
+            title: b.title || `${b.provider} Booking`,
+            subtitle: `${b.location || 'Confirmed Route'} • Ref: ${b.confirmation_number}`,
+            bookingRef: b.confirmation_number,
+            travelDate: b.start_date,
+            origin: b.origin || b.location,
+            destination: b.destination || b.location,
+            amount: b.amount || 0,
+            passengersOrGuests: b.passenger_or_guest_name || 'Trip Member',
+            status: 'Confirmed',
+            categoryLabel: `${b.provider || 'Verified'} Voucher`,
+            details: {
+              'Confirmation Number': b.confirmation_number,
+              'Provider / Carrier': b.provider,
+              'Dates': `${b.start_date}${b.end_date ? ` to ${b.end_date}` : ''}`,
+              'Location / Station': b.location,
+              'Seat / Room': b.seat_or_room || 'Assigned',
+              'Special Notes': b.notes || 'Verified with Travel Concierge'
+            },
+            qrData: `GT-${b.confirmation_number}|${b.amount}|${b.start_date}`
+          }));
+
+          setConfirmedBookings(prev => {
+            const existingRefs = new Set(prev.map(p => p.bookingRef));
+            const newItems = mapped.filter(m => !existingRefs.has(m.bookingRef));
+            return [...newItems, ...prev];
+          });
+        }
+      } catch (err) {
+        console.warn('Could not load backend bookings:', err);
+      }
+    }
+    loadBackendBookings();
+  }, [activeTrip?.id]);
 
   // User's itinerary destination cities (derived from activeTrip)
   const itineraryCities = useMemo(() => {
@@ -1129,14 +1176,22 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
 
           <button
             onClick={() => setActiveSubSection('my-bookings')}
-            className={`ml-auto px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center space-x-2 cursor-pointer ${
+            className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center space-x-2 cursor-pointer ${
               activeSubSection === 'my-bookings'
                 ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30 ring-2 ring-emerald-300'
                 : 'bg-white/10 text-slate-300 hover:bg-white/15 hover:text-white'
             }`}
           >
             <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-            <span>Confirmed Vouchers & Tickets ({confirmedBookings.length})</span>
+            <span>3. Confirmed Vouchers ({confirmedBookings.length})</span>
+          </button>
+
+          <button
+            onClick={() => setIsImportModalOpen(true)}
+            className="ml-auto px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 text-slate-950 shadow-lg shadow-amber-500/25 hover:brightness-105 transition-all flex items-center space-x-2 cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-indigo-950" />
+            <span>Import Booking / Voucher (AI Parser)</span>
           </button>
         </div>
       </div>
@@ -2305,6 +2360,16 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* AI Booking Import Modal */}
+      <BookingImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        activeTrip={activeTrip}
+        onBookingSaved={(freshTrip) => {
+          if (onTripUpdated) onTripUpdated(freshTrip);
+        }}
+      />
     </div>
   );
 };

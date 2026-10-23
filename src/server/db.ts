@@ -136,11 +136,67 @@ export function initDatabase() {
       image_url TEXT NOT NULL,
       recommended_time TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS activity_proposals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trip_id INTEGER NOT NULL,
+      stop_id INTEGER,
+      proposer_user_id INTEGER,
+      proposer_name TEXT NOT NULL,
+      title TEXT NOT NULL,
+      place TEXT NOT NULL,
+      cost_per_person REAL DEFAULT 0,
+      description TEXT,
+      category TEXT DEFAULT 'sightseeing',
+      status TEXT DEFAULT 'open',
+      deadline TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE,
+      FOREIGN KEY (stop_id) REFERENCES stops(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS proposal_votes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      proposal_id INTEGER NOT NULL,
+      user_id INTEGER,
+      user_name TEXT NOT NULL,
+      vote TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (proposal_id) REFERENCES activity_proposals(id) ON DELETE CASCADE,
+      UNIQUE(proposal_id, user_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS bookings (
+      id TEXT PRIMARY KEY,
+      trip_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      provider TEXT,
+      title TEXT NOT NULL,
+      subtitle TEXT,
+      booking_ref TEXT NOT NULL,
+      travel_date TEXT NOT NULL,
+      end_date TEXT,
+      origin TEXT,
+      destination TEXT,
+      amount REAL NOT NULL,
+      currency TEXT DEFAULT 'INR',
+      passengers_or_guests TEXT,
+      status TEXT DEFAULT 'Confirmed',
+      category_label TEXT,
+      details TEXT DEFAULT '{}',
+      qr_data TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+    );
   `);
 
   // Column migrations for existing databases
   try {
     db.exec('ALTER TABLE trips ADD COLUMN invite_code TEXT;');
+  } catch {}
+  try {
+    db.exec('ALTER TABLE trips ADD COLUMN voting_deadline TEXT;');
   } catch {}
   try {
     db.exec('ALTER TABLE expenses ADD COLUMN paid_by_user_id INTEGER;');
@@ -175,6 +231,7 @@ export function initDatabase() {
 
   seedData();
   seedCatalog();
+  seedProposalsAndBookings();
 }
 
 // Cryptographic JWT Implementation (HMAC-SHA256)
@@ -431,6 +488,160 @@ function seedCatalog() {
   }
 }
 
+function seedProposalsAndBookings() {
+  const trip = db.prepare('SELECT id, start_date FROM trips LIMIT 1').get() as any;
+  if (!trip) return;
+
+  // Check if proposals already seeded
+  const proposalCount = (db.prepare('SELECT COUNT(*) as c FROM activity_proposals').get() as any).c;
+  if (proposalCount === 0) {
+    const stops = db.prepare('SELECT id, city_name FROM stops WHERE trip_id = ?').all(trip.id) as any[];
+    const p1Stop = stops.find((s: any) => s.city_name.includes('Paris')) || stops[1] || stops[0];
+    const p2Stop = stops.find((s: any) => s.city_name.includes('Rome')) || stops[2] || stops[0];
+    const p3Stop = stops.find((s: any) => s.city_name.includes('Zurich')) || stops[0];
+
+    const deadlineDate = new Date();
+    deadlineDate.setDate(deadlineDate.getDate() + 7);
+    const deadlineStr = deadlineDate.toISOString().split('T')[0];
+
+    db.prepare('UPDATE trips SET voting_deadline = ? WHERE id = ?').run(deadlineStr, trip.id);
+
+    // Proposal 1: Seine River Sunset Cruise
+    const res1 = db.prepare(`
+      INSERT INTO activity_proposals (trip_id, stop_id, proposer_name, title, place, cost_per_person, description, category, status, deadline)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+    `).run(
+      trip.id,
+      p1Stop?.id || null,
+      'Sophie Taylor',
+      'Sunset Champagne Cruise on the Seine',
+      'Pont Neuf, Paris',
+      3600,
+      'Watch golden hour light up the Eiffel Tower and Notre Dame with a glass of French champagne.',
+      'relaxation',
+      deadlineStr
+    );
+    const prop1Id = Number((res1 as any).lastInsertRowid);
+
+    // Proposal 2: Colosseum Underground & Night Arena
+    const res2 = db.prepare(`
+      INSERT INTO activity_proposals (trip_id, stop_id, proposer_name, title, place, cost_per_person, description, category, status, deadline)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+    `).run(
+      trip.id,
+      p2Stop?.id || null,
+      'Alex Morgan',
+      'VIP Moonlight Colosseum Underground Tour',
+      'Piazza del Colosseo, Rome',
+      5400,
+      'Exclusive night access into the gladiator dungeons and trapdoors away from daytime crowds.',
+      'culture',
+      deadlineStr
+    );
+    const prop2Id = Number((res2 as any).lastInsertRowid);
+
+    // Proposal 3: Swiss Alps Cableway to Mount Titlis
+    const res3 = db.prepare(`
+      INSERT INTO activity_proposals (trip_id, stop_id, proposer_name, title, place, cost_per_person, description, category, status, deadline)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+    `).run(
+      trip.id,
+      p3Stop?.id || null,
+      'Liam Davies',
+      'Mount Titlis Rotair Cableway & Glacier Cave',
+      'Engelberg, Switzerland',
+      7800,
+      'Rotating panoramic cable car up to 3,020 meters above sea level with ice flyer and suspension bridge walk.',
+      'adventure',
+      deadlineStr
+    );
+    const prop3Id = Number((res3 as any).lastInsertRowid);
+
+    // Seed votes
+    const insertVote = db.prepare(`
+      INSERT INTO proposal_votes (proposal_id, user_name, vote)
+      VALUES (?, ?, ?)
+    `);
+
+    // Prop 1 votes
+    insertVote.run(prop1Id, 'Alex Morgan', 'yes');
+    insertVote.run(prop1Id, 'Sophie Taylor', 'yes');
+    insertVote.run(prop1Id, 'Liam Davies', 'maybe');
+
+    // Prop 2 votes (top voted!)
+    insertVote.run(prop2Id, 'Alex Morgan', 'yes');
+    insertVote.run(prop2Id, 'Sophie Taylor', 'yes');
+    insertVote.run(prop2Id, 'Liam Davies', 'yes');
+
+    // Prop 3 votes
+    insertVote.run(prop3Id, 'Alex Morgan', 'no');
+    insertVote.run(prop3Id, 'Sophie Taylor', 'maybe');
+    insertVote.run(prop3Id, 'Liam Davies', 'yes');
+  }
+
+  // Seed bookings if empty
+  const bookingCount = (db.prepare('SELECT COUNT(*) as c FROM bookings').get() as any).c;
+  if (bookingCount === 0) {
+    const insertBooking = db.prepare(`
+      INSERT INTO bookings (id, trip_id, type, provider, title, subtitle, booking_ref, travel_date, origin, destination, amount, currency, passengers_or_guests, status, category_label, details, qr_data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insertBooking.run(
+      'BK-1049',
+      trip.id,
+      'train',
+      'IRCTC / Indian Railways',
+      '12952 / MUMBAI RAJDHANI EXPRESS',
+      'Coach B3, Berth 27 (Lower Berth) • 3A Tier',
+      '241-8934102',
+      trip.start_date || '2026-06-12',
+      'New Delhi (NDLS)',
+      'Mumbai Central (MMCT)',
+      1875,
+      'INR',
+      '1 Adult (Alex Morgan)',
+      'Confirmed',
+      'IRCTC Indian Railways',
+      JSON.stringify({
+        'Train No & Name': '12952 / MUMBAI RAJDHANI',
+        'PNR Number': '241-8934102',
+        'Departure': '16:55 (NDLS)',
+        'Arrival': '08:35 (MMCT)',
+        'Class': 'AC 3 Tier (3A)',
+        'Coach / Berth': 'B3 - 27 (LB)',
+        'Charting Status': 'CHART NOT PREPARED'
+      }),
+      'GT-241-8934102|1875|CONFIRMED'
+    );
+
+    insertBooking.run(
+      'BK-1050',
+      trip.id,
+      'rental_car',
+      'Goa Self-Drive Hub',
+      'Mahindra Thar 4x4 Convertible Rental',
+      'Self-Drive • Free 250 km/day • Keyless Bluetooth Pickup',
+      'GA-RENT-77190',
+      trip.start_date || '2026-06-15',
+      'Goa Dabolim Airport Hub',
+      'Goa',
+      3900,
+      'INR',
+      'Alex Morgan',
+      'Confirmed',
+      'Vehicle Rental',
+      JSON.stringify({
+        'Assigned Plate': 'GA 03 AB 4912',
+        'Vehicle Model': 'Mahindra Thar 4x4 Hardtop Diesel',
+        'Pickup Location': 'Goa Dabolim Airport Hub Counter 4',
+        'Fuel Policy': 'Full to Full'
+      }),
+      'GT-GA-RENT-77190|3900|CONFIRMED'
+    );
+  }
+}
+
 // Database query helpers
 export const dbOps = {
   // User operations
@@ -554,6 +765,8 @@ export const dbOps = {
     trip.expenses = expenses;
     trip.members = members;
     trip.destinations_count = stops.length;
+    trip.proposals = this.getProposals(id);
+    trip.bookings = this.getBookings(id);
     return trip;
   },
 
@@ -1291,5 +1504,252 @@ export const dbOps = {
       return (db.prepare("SELECT DISTINCT country FROM catalog WHERE country != 'India' ORDER BY country ASC").all() as any[]).map(r => r.country);
     }
     return (db.prepare('SELECT DISTINCT country FROM catalog ORDER BY country ASC').all() as any[]).map(r => r.country);
+  },
+
+  // Voting Board & Activity Proposals
+  getProposals(tripId: number, currentUserName?: string) {
+    const trip = db.prepare('SELECT voting_deadline FROM trips WHERE id = ?').get(tripId) as any;
+    const defaultDeadline = trip?.voting_deadline;
+
+    const proposals = db.prepare(`
+      SELECT p.*, s.city_name as stop_city_name
+      FROM activity_proposals p
+      LEFT JOIN stops s ON p.stop_id = s.id
+      WHERE p.trip_id = ?
+      ORDER BY p.status = 'open' DESC, p.created_at DESC
+    `).all(tripId) as any[];
+
+    for (const prop of proposals) {
+      if (!prop.deadline && defaultDeadline) {
+        prop.deadline = defaultDeadline;
+      }
+
+      const votes = db.prepare(`
+        SELECT * FROM proposal_votes WHERE proposal_id = ? ORDER BY created_at ASC
+      `).all(prop.id) as any[];
+
+      prop.votes = votes;
+      let yes = 0;
+      let no = 0;
+      let maybe = 0;
+      let userVote: string | undefined = undefined;
+
+      for (const v of votes) {
+        if (v.vote === 'yes') yes++;
+        else if (v.vote === 'no') no++;
+        else if (v.vote === 'maybe') maybe++;
+
+        if (currentUserName && v.user_name?.toLowerCase() === currentUserName.toLowerCase()) {
+          userVote = v.vote;
+        }
+      }
+
+      prop.yesCount = yes;
+      prop.noCount = no;
+      prop.maybeCount = maybe;
+      prop.score = yes - no;
+      prop.userVote = userVote;
+    }
+
+    proposals.sort((a, b) => {
+      if (a.status === 'open' && b.status !== 'open') return -1;
+      if (a.status !== 'open' && b.status === 'open') return 1;
+      if (a.status === 'open' && b.status === 'open') {
+        if ((b.score ?? 0) !== (a.score ?? 0)) return (b.score ?? 0) - (a.score ?? 0);
+        return (b.yesCount ?? 0) - (a.yesCount ?? 0);
+      }
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+
+    return proposals;
+  },
+
+  createProposal(data: {
+    trip_id: number;
+    stop_id?: number | null;
+    proposer_user_id?: number | null;
+    proposer_name: string;
+    title: string;
+    place: string;
+    cost_per_person: number;
+    description?: string;
+    category?: string;
+    deadline?: string;
+  }) {
+    const trip = db.prepare('SELECT voting_deadline FROM trips WHERE id = ?').get(data.trip_id) as any;
+    const deadline = data.deadline || trip?.voting_deadline || null;
+
+    const res = db.prepare(`
+      INSERT INTO activity_proposals (trip_id, stop_id, proposer_user_id, proposer_name, title, place, cost_per_person, description, category, status, deadline)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+    `).run(
+      data.trip_id,
+      data.stop_id || null,
+      data.proposer_user_id || null,
+      data.proposer_name,
+      data.title.trim(),
+      data.place.trim(),
+      Number(data.cost_per_person) || 0,
+      data.description || '',
+      data.category || 'sightseeing',
+      deadline
+    );
+
+    const propId = Number((res as any).lastInsertRowid);
+    db.prepare(`
+      INSERT OR REPLACE INTO proposal_votes (proposal_id, user_id, user_name, vote)
+      VALUES (?, ?, ?, 'yes')
+    `).run(propId, data.proposer_user_id || null, data.proposer_name);
+
+    return this.getProposalById(propId);
+  },
+
+  getProposalById(proposalId: number) {
+    const prop = db.prepare(`
+      SELECT p.*, s.city_name as stop_city_name
+      FROM activity_proposals p
+      LEFT JOIN stops s ON p.stop_id = s.id
+      WHERE p.id = ?
+    `).get(proposalId) as any;
+    if (!prop) return null;
+
+    const votes = db.prepare('SELECT * FROM proposal_votes WHERE proposal_id = ?').all(prop.id) as any[];
+    prop.votes = votes;
+    prop.yesCount = votes.filter(v => v.vote === 'yes').length;
+    prop.noCount = votes.filter(v => v.vote === 'no').length;
+    prop.maybeCount = votes.filter(v => v.vote === 'maybe').length;
+    prop.score = prop.yesCount - prop.noCount;
+    return prop;
+  },
+
+  voteProposal(proposalId: number, userId: number | null, userName: string, vote: 'yes' | 'no' | 'maybe') {
+    db.prepare(`
+      INSERT INTO proposal_votes (proposal_id, user_id, user_name, vote)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(proposal_id, user_name) DO UPDATE SET vote = excluded.vote, created_at = CURRENT_TIMESTAMP
+    `).run(proposalId, userId || null, userName.trim(), vote);
+
+    return this.getProposalById(proposalId);
+  },
+
+  setVotingDeadline(tripId: number, deadline: string) {
+    db.prepare('UPDATE trips SET voting_deadline = ? WHERE id = ?').run(deadline, tripId);
+    db.prepare('UPDATE activity_proposals SET deadline = ? WHERE trip_id = ? AND status = "open"').run(deadline, tripId);
+    return this.getProposals(tripId);
+  },
+
+  acceptProposalToItinerary(proposalId: number, options: { stop_id?: number; date?: string; time_slot?: string; party_size?: number }) {
+    const prop = this.getProposalById(proposalId);
+    if (!prop) return null;
+
+    let stopId = options.stop_id || prop.stop_id;
+    if (!stopId) {
+      const firstStop = db.prepare('SELECT id FROM stops WHERE trip_id = ? ORDER BY order_index ASC LIMIT 1').get(prop.trip_id) as any;
+      stopId = firstStop ? firstStop.id : null;
+    }
+
+    if (!stopId) throw new Error('A trip stop is required to add this activity to the itinerary');
+
+    const stop = db.prepare('SELECT * FROM stops WHERE id = ?').get(stopId) as any;
+    const actDate = options.date || stop.start_date || new Date().toISOString().split('T')[0];
+    const timeSlot = options.time_slot || 'afternoon';
+    const partySize = options.party_size && options.party_size > 0 ? options.party_size : 1;
+    const totalCost = (Number(prop.cost_per_person) || 0) * partySize;
+
+    const activity = this.createActivity({
+      stop_id: stopId,
+      trip_id: prop.trip_id,
+      title: prop.title,
+      description: prop.description || `Voted & approved activity at ${prop.place}`,
+      date: actDate,
+      time_slot: timeSlot,
+      cost: totalCost,
+      category: prop.category || 'sightseeing',
+      duration_hours: 2.5,
+      location: prop.place,
+      booking_status: 'planned'
+    });
+
+    if (totalCost > 0) {
+      this.createExpense({
+        trip_id: prop.trip_id,
+        stop_id: stopId,
+        title: `${prop.title} (${partySize} pax)`,
+        category: 'activities',
+        amount: totalCost,
+        currency: 'INR',
+        date: actDate,
+        paid_by: prop.proposer_name || 'Traveler',
+        notes: `Approved via voting board. Cost: ₹${prop.cost_per_person}/person`
+      });
+    }
+
+    db.prepare('UPDATE activity_proposals SET status = "accepted" WHERE id = ?').run(proposalId);
+
+    return {
+      proposal: this.getProposalById(proposalId),
+      activity,
+      trip: this.getTripById(prop.trip_id)
+    };
+  },
+
+  deleteProposal(proposalId: number) {
+    db.prepare('DELETE FROM activity_proposals WHERE id = ?').run(proposalId);
+    return true;
+  },
+
+  // Bookings Storage & Management
+  getBookings(tripId: number) {
+    const list = db.prepare(`
+      SELECT * FROM bookings WHERE trip_id = ? ORDER BY travel_date ASC, created_at DESC
+    `).all(tripId) as any[];
+
+    for (const b of list) {
+      if (typeof b.details === 'string') {
+        try { b.details = JSON.parse(b.details); } catch { b.details = {}; }
+      }
+    }
+    return list;
+  },
+
+  createBooking(tripId: number, data: any) {
+    const id = data.id || 'BK-' + Math.floor(1000 + Math.random() * 9000);
+    const detailsStr = typeof data.details === 'string' ? data.details : JSON.stringify(data.details || {});
+
+    db.prepare(`
+      INSERT OR REPLACE INTO bookings (id, trip_id, type, provider, title, subtitle, booking_ref, travel_date, end_date, origin, destination, amount, currency, passengers_or_guests, status, category_label, details, qr_data, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      tripId,
+      data.type || 'activity',
+      data.provider || '',
+      data.title || 'Confirmed Reservation',
+      data.subtitle || '',
+      data.booking_ref || data.bookingRef || 'REF-' + Math.floor(100000 + Math.random() * 900000),
+      data.travel_date || data.travelDate || new Date().toISOString().split('T')[0],
+      data.end_date || data.endDate || null,
+      data.origin || '',
+      data.destination || '',
+      Number(data.amount) || 0,
+      data.currency || 'INR',
+      data.passengers_or_guests || data.passengersOrGuests || '1 Traveler',
+      data.status || 'Confirmed',
+      data.category_label || data.categoryLabel || 'Booking',
+      detailsStr,
+      data.qr_data || data.qrData || `GT-${id}|${data.booking_ref}|CONFIRMED`,
+      data.notes || ''
+    );
+
+    const b = db.prepare('SELECT * FROM bookings WHERE id = ?').get(id) as any;
+    if (b && typeof b.details === 'string') {
+      try { b.details = JSON.parse(b.details); } catch { b.details = {}; }
+    }
+    return b;
+  },
+
+  deleteBooking(id: string) {
+    db.prepare('DELETE FROM bookings WHERE id = ?').run(id);
+    return true;
   }
 };

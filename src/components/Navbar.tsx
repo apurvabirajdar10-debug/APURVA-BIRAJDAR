@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Compass, Sparkles, Plus, MapPin, Calendar, IndianRupee, User as UserIcon, LogOut, Menu, X, ChevronDown, ListFilter, Globe2, Ticket } from 'lucide-react';
+import { Compass, Sparkles, Plus, MapPin, Calendar, IndianRupee, User as UserIcon, LogOut, Menu, X, ChevronDown, ListFilter, Globe2, Ticket, Vote, Download } from 'lucide-react';
 import { User, Trip } from '../types/travel';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface NavbarProps {
   currentTab: string;
@@ -15,6 +16,7 @@ interface NavbarProps {
   allTrips: Trip[];
   scope?: 'national' | 'international';
   onScopeChange?: (scope: 'national' | 'international') => void;
+  onOpenOfflinePack?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -30,6 +32,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   allTrips,
   scope = 'national',
   onScopeChange,
+  onOpenOfflinePack,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [tripDropdownOpen, setTripDropdownOpen] = useState(false);
@@ -162,6 +165,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <IndianRupee className="w-3.5 h-3.5" />
                   <span>Budget & Costs</span>
                 </button>
+                <button
+                  onClick={() => setCurrentTab('voting')}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-1.5 ${
+                    currentTab === 'voting'
+                      ? 'text-amber-600 bg-amber-50 font-semibold'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                  }`}
+                >
+                  <Vote className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Voting Board</span>
+                </button>
+                {onOpenOfflinePack && (
+                  <button
+                    onClick={onOpenOfflinePack}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors flex items-center space-x-1 cursor-pointer"
+                    title="View and download offline trip dossier"
+                  >
+                    <Download className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Offline Pack</span>
+                  </button>
+                )}
               </>
             )}
 
@@ -234,6 +258,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-amber-300 group-hover:rotate-12 transition-transform" />
               <span>AI Assistant</span>
             </button>
+
+            {/* PWA Install Button */}
+            <PWAInstallButton />
 
             {/* Plan New Trip CTA */}
             <button
@@ -422,6 +449,28 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <IndianRupee className="w-4 h-4 text-sky-600" />
                   <span>Budget & Costs</span>
                 </button>
+                <button
+                  onClick={() => {
+                    setCurrentTab('voting');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
+                >
+                  <Vote className="w-4 h-4 text-amber-500" />
+                  <span>Voting Board</span>
+                </button>
+                {onOpenOfflinePack && (
+                  <button
+                    onClick={() => {
+                      onOpenOfflinePack();
+                      setMobileMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
+                  >
+                    <Download className="w-4 h-4 text-indigo-600" />
+                    <span>Offline Trip Pack</span>
+                  </button>
+                )}
               </>
             )}
             <button

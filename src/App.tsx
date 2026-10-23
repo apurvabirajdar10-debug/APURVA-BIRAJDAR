@@ -16,6 +16,9 @@ import { UserProfileView } from './components/UserProfileView';
 import { LoginPage } from './components/LoginPage';
 import { BookingsView } from './components/BookingsView';
 import { TripMembersModal } from './components/TripMembersModal';
+import { VotingBoardView } from './components/VotingBoardView';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { OfflinePackModal } from './components/OfflinePackModal';
 import { Trip, User } from './types/travel';
 import { api, clearAuthToken, setAuthToken } from './lib/api';
 
@@ -35,6 +38,7 @@ export default function App() {
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const [tripMembersModalOpen, setTripMembersModalOpen] = useState(false);
   const [tripForMembers, setTripForMembers] = useState<Trip | null>(null);
+  const [offlinePackModalOpen, setOfflinePackModalOpen] = useState(false);
 
   // Discovery / Catalog search filter hint
   const [catalogSearchHint, setCatalogSearchHint] = useState<string>('');
@@ -244,6 +248,22 @@ export default function App() {
         allTrips={trips}
         scope={destinationScope}
         onScopeChange={setDestinationScope}
+        onOpenOfflinePack={() => setOfflinePackModalOpen(true)}
+      />
+
+      {/* PWA Offline Banner & Sync Status */}
+      <OfflineIndicator
+        onOpenOfflinePackModal={() => setOfflinePackModalOpen(true)}
+        onSyncComplete={async () => {
+          if (activeTrip) {
+            try {
+              const fresh = await api.getTrip(activeTrip.id);
+              handleTripUpdated(fresh.trip);
+            } catch (e) {
+              console.warn('Could not reload trip after sync:', e);
+            }
+          }
+        }}
       />
 
       {/* Main Content Area */}
@@ -402,6 +422,28 @@ export default function App() {
             onTripUpdated={handleTripUpdated}
           />
         )}
+
+        {/* VIEW 10: COLLABORATIVE VOTING BOARD */}
+        {currentTab === 'voting' && (
+          activeTrip ? (
+            <VotingBoardView
+              trip={activeTrip}
+              user={user}
+              onTripUpdated={handleTripUpdated}
+              onGoToItinerary={() => setCurrentTab('itinerary')}
+            />
+          ) : (
+            <div className="p-12 text-center bg-white rounded-3xl border border-dashed border-slate-300 space-y-3">
+              <p className="text-sm font-semibold text-slate-700">Please select a trip to access the voting board.</p>
+              <button
+                onClick={() => setCurrentTab('trips')}
+                className="px-4 py-2 bg-sky-600 text-white rounded-xl text-xs font-semibold"
+              >
+                Go to My Trips
+              </button>
+            </div>
+          )
+        )}
       </main>
 
       {/* Floating Conversational Trip Assistant */}
@@ -447,6 +489,15 @@ export default function App() {
           isOpen={optimizerModalOpen}
           onClose={() => setOptimizerModalOpen(false)}
           trip={activeTrip}
+        />
+      )}
+
+      {/* PWA Offline Trip Pack Modal */}
+      {offlinePackModalOpen && (activeTrip || trips[0]) && (
+        <OfflinePackModal
+          isOpen={offlinePackModalOpen}
+          onClose={() => setOfflinePackModalOpen(false)}
+          trip={activeTrip || trips[0]}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-import { Trip, User, Stop, Activity, Expense, CatalogItem, OptimizationResult, AIItineraryPlan, TripMember, TripBalancesResponse, Settlement } from '../types/travel';
+import { Trip, User, Stop, Activity, Expense, CatalogItem, OptimizationResult, AIItineraryPlan, TripMember, TripBalancesResponse, Settlement, ActivityProposal, BookingExtraction, OfflineTripPack, VoteType } from '../types/travel';
 
 const API_BASE = '/api';
 
@@ -228,4 +228,68 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ trip_id: tripId, message, history }),
     }),
+
+  // Voting Board
+  getProposals: (tripId: number) =>
+    request<{ proposals: ActivityProposal[]; voting_deadline?: string; trip_name?: string }>(`/trips/${tripId}/proposals`),
+
+  proposeActivity: (tripId: number, data: Partial<ActivityProposal>) =>
+    request<{ proposal: ActivityProposal; proposals: ActivityProposal[]; message: string }>(`/trips/${tripId}/proposals`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  voteProposal: (proposalId: number, vote: VoteType, userName?: string) =>
+    request<{ proposal: ActivityProposal; message: string }>(`/proposals/${proposalId}/vote`, {
+      method: 'POST',
+      body: JSON.stringify({ vote, user_name: userName }),
+    }),
+
+  setVotingDeadline: (tripId: number, deadline: string) =>
+    request<{ deadline: string; proposals: ActivityProposal[]; message: string }>(`/trips/${tripId}/voting-deadline`, {
+      method: 'PUT',
+      body: JSON.stringify({ deadline }),
+    }),
+
+  acceptProposal: (proposalId: number, options: { stop_id?: number; date?: string; time_slot?: string; party_size?: number }) =>
+    request<{ proposal: ActivityProposal; activity: Activity; trip: Trip; message: string }>(`/proposals/${proposalId}/accept`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    }),
+
+  deleteProposal: (proposalId: number) =>
+    request<{ success: boolean; message: string }>(`/proposals/${proposalId}`, {
+      method: 'DELETE',
+    }),
+
+  // Bookings & Import
+  getBookings: (tripId: number) =>
+    request<{ bookings: any[] }>(`/trips/${tripId}/bookings`),
+
+  createBooking: (tripId: number, booking: any) =>
+    request<{ booking: any; message: string }>(`/trips/${tripId}/bookings`, {
+      method: 'POST',
+      body: JSON.stringify(booking),
+    }),
+
+  deleteBooking: (bookingId: string) =>
+    request<{ success: boolean; message: string }>(`/bookings/${bookingId}`, {
+      method: 'DELETE',
+    }),
+
+  extractBooking: (data: { text?: string; pdfBase64?: string; mimeType?: string; fileName?: string }) =>
+    request<{ extraction: BookingExtraction }>('/bookings/extract', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  saveBookingToTimeline: (data: { trip_id: number; stop_id?: number; booking: any; add_to_expenses?: boolean; add_to_timeline?: boolean }) =>
+    request<{ booking: any; activity: Activity | null; trip: Trip; message: string }>('/bookings/save-to-timeline', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Offline Trip Pack
+  getOfflinePack: (tripId: number) =>
+    request<{ pack: OfflineTripPack }>(`/trips/${tripId}/offline-pack`),
 };

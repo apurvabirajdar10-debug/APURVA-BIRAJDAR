@@ -137,6 +137,8 @@ export interface Trip {
   expenses?: Expense[];
   members?: TripMember[];
   user_role?: 'owner' | 'editor' | 'viewer';
+  voting_deadline?: string;
+  proposals?: ActivityProposal[];
   // Aggregated summary fields
   total_spent?: number;
   destinations_count?: number;
@@ -201,3 +203,80 @@ export interface AIItineraryPlan {
     }[];
   }[];
 }
+
+export type VoteType = 'yes' | 'no' | 'maybe';
+
+export interface ProposalVote {
+  id?: number;
+  proposal_id: number;
+  user_id?: number | null;
+  user_name: string;
+  vote: VoteType;
+  created_at?: string;
+}
+
+export interface ActivityProposal {
+  id: number;
+  trip_id: number;
+  stop_id?: number | null;
+  stop_city_name?: string;
+  proposer_user_id?: number | null;
+  proposer_name: string;
+  title: string;
+  place: string;
+  cost_per_person: number;
+  description?: string;
+  category: 'sightseeing' | 'food' | 'culture' | 'adventure' | 'relaxation' | 'shopping' | 'transport';
+  status: 'open' | 'accepted' | 'rejected';
+  deadline?: string;
+  created_at: string;
+  votes?: ProposalVote[];
+  yesCount?: number;
+  noCount?: number;
+  maybeCount?: number;
+  score?: number; // yesCount - noCount
+  userVote?: VoteType;
+}
+
+export interface BookingExtraction {
+  type: 'flight' | 'train' | 'hotel' | 'rental_car' | 'bus' | 'activity' | 'other';
+  provider: string;
+  confirmation_number: string;
+  title: string;
+  start_date: string;
+  end_date?: string;
+  start_time?: string;
+  end_time?: string;
+  location: string;
+  origin?: string;
+  destination?: string;
+  amount: number;
+  currency: string;
+  passenger_or_guest_name?: string;
+  seat_or_room?: string;
+  notes?: string;
+  confidence?: string;
+}
+
+export interface EmergencyContact {
+  label: string;
+  number: string;
+  description: string;
+  type: 'police' | 'medical' | 'fire' | 'tourist' | 'railway' | 'embassy' | 'member';
+}
+
+export interface OfflineTripPack {
+  tripId: number;
+  tripName: string;
+  downloadedAt: string;
+  startDate: string;
+  endDate: string;
+  budgetTotal: number;
+  totalSpent: number;
+  stops: Stop[];
+  bookings: any[];
+  emergencyContacts: EmergencyContact[];
+  members: TripMember[];
+  proposals?: ActivityProposal[];
+}
+
