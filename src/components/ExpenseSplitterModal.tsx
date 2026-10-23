@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Users, IndianRupee, AlertCircle, Plus, Minus, CheckCircle2, Calculator, ArrowRight } from 'lucide-react';
+import { X, Users, IndianRupee, AlertCircle, Plus, Minus, CheckCircle2, Calculator, ArrowRight, Share2, Download, FileText, Check } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import { Trip } from '../types/travel';
 
 interface ExpenseSplitterModalProps {
@@ -7,6 +8,283 @@ interface ExpenseSplitterModalProps {
   onClose: () => void;
   trip: Trip;
   onOpenSetBudget?: () => void;
+}
+
+/**
+ * Draws a sharp vector Rupee glyph (₹) directly into the jsPDF canvas
+ * to guarantee flawless visual rendering in all PDF viewers.
+ */
+function drawRupeeGlyph(doc: jsPDF, x: number, y: number, sizePt: number = 10): number {
+  const mm = sizePt * 0.352778;
+  const w = mm * 0.55;
+  const h = mm * 0.78;
+  const topY = y - h * 0.88;
+  const midY = topY + h * 0.35;
+  const loopBottom = topY + h * 0.58;
+  const lineW = Math.max(0.18, mm * 0.08);
+
+  doc.setLineWidth(lineW);
+  // Top horizontal bar
+  doc.line(x, topY, x + w, topY);
+  // Mid horizontal bar
+  doc.line(x, midY, x + w * 0.82, midY);
+  // Left vertical stem
+  doc.line(x + w * 0.15, topY, x + w * 0.15, loopBottom);
+  // Rounded upper loop
+  doc.line(x + w * 0.15, topY, x + w * 0.58, topY);
+  doc.line(x + w * 0.58, topY, x + w * 0.58, loopBottom);
+  doc.line(x + w * 0.58, loopBottom, x + w * 0.15, loopBottom);
+  // Diagonal leg down-right
+  doc.line(x + w * 0.25, loopBottom, x + w * 0.85, y);
+
+  return w;
+}
+
+/**
+ * Generates a clean, standalone one-page PDF summarizing the itinerary expense split.
+ */
+function generateExpenseSplitPdf(options: {
+  trip: Trip;
+  totalBudget: number;
+  memberCount: number;
+  perPersonShare: number;
+  formattedPerPerson: string;
+  remainderMessage: string;
+}): jsPDF {
+  const { trip, totalBudget, memberCount, formattedPerPerson, remainderMessage } = options;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = 210;
+  const margin = 16;
+  const contentWidth = pageWidth - margin * 2; // 178mm
+
+  // 1. Top Decorative Brand Banner
+  doc.setFillColor(5, 150, 105); // emerald-600
+  doc.rect(0, 0, pageWidth, 5, 'F');
+
+  // 2. Header Section
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.roundedRect(margin, 10, contentWidth, 24, 3, 3, 'F');
+  doc.setDrawColor(226, 232, 240); // slate-200
+  doc.setLineWidth(0.3);
+  doc.roundedRect(margin, 10, contentWidth, 24, 3, 3, 'S');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(15, 23, 42); // slate-900
+  doc.text('GLOBE TROTTER', margin + 6, 19);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(100, 116, 139); // slate-500
+  doc.text('Travel Itinerary Expense Splitter Report', margin + 6, 25);
+
+  const now = new Date();
+  const dateStr =
+    now.toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }) +
+    ' • ' +
+    now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(5, 150, 105); // emerald-600
+  doc.text('GENERATED ON', pageWidth - margin - 6, 19, { align: 'right' });
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(dateStr, pageWidth - margin - 6, 25, { align: 'right' });
+
+  // 3. Itinerary Card
+  let curY = 38;
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(margin, curY, contentWidth, 22, 3, 3, 'F');
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(margin, curY, contentWidth, 22, 3, 3, 'S');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('ITINERARY DETAILS', margin + 6, curY + 6.5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(15, 23, 42);
+  const truncatedName = doc.splitTextToSize(`${trip.name} (Itinerary #${trip.id})`, contentWidth - 12)[0];
+  doc.text(truncatedName, margin + 6, curY + 14);
+
+  // 4. Primary Hero Card: Per-Person Share
+  curY = 64;
+  doc.setFillColor(236, 253, 245); // emerald-50
+  doc.roundedRect(margin, curY, contentWidth, 42, 4, 4, 'F');
+  doc.setDrawColor(16, 185, 129); // emerald-500
+  doc.setLineWidth(0.6);
+  doc.roundedRect(margin, curY, contentWidth, 42, 4, 4, 'S');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(6, 95, 70); // emerald-800
+  doc.text('PER-PERSON SHARE', pageWidth / 2, curY + 8.5, { align: 'center' });
+
+  // Draw Rupee glyph + amount
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(26);
+  doc.setTextColor(6, 78, 59); // emerald-950
+
+  const amountStr = formattedPerPerson;
+  const numWidth = doc.getTextWidth(amountStr);
+  const glyphSizePt = 24;
+  const glyphWidthMm = glyphSizePt * 0.352778 * 0.55;
+  const gapMm = 2;
+  const totalShareWidth = glyphWidthMm + gapMm + numWidth;
+  const startShareX = (pageWidth - totalShareWidth) / 2;
+
+  doc.setDrawColor(6, 78, 59);
+  drawRupeeGlyph(doc, startShareX, curY + 22, glyphSizePt);
+  doc.text(amountStr, startShareX + glyphWidthMm + gapMm, curY + 22);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(51, 65, 85);
+  doc.text(
+    `Total budget divided among ${memberCount} ${memberCount === 1 ? 'member' : 'members'}`,
+    pageWidth / 2,
+    curY + 28,
+    { align: 'center' }
+  );
+
+  if (remainderMessage) {
+    doc.setFillColor(209, 250, 229);
+    doc.roundedRect(margin + 10, curY + 32, contentWidth - 20, 6.5, 2, 2, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(4, 120, 87);
+    doc.text(remainderMessage, pageWidth / 2, curY + 36.5, { align: 'center' });
+  }
+
+  // 5. Total Budget & Members Summary Banner
+  curY = 111;
+  const colW = (contentWidth - 6) / 2;
+
+  // Left: Total Budget
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(margin, curY, colW, 21, 3, 3, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(margin, curY, colW, 21, 3, 3, 'S');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('TOTAL ITINERARY BUDGET', margin + 5, curY + 6.5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(15, 23, 42);
+  doc.setDrawColor(15, 23, 42);
+  const budgetStr = totalBudget.toLocaleString('en-IN');
+  const bGlyphW = drawRupeeGlyph(doc, margin + 5, curY + 14.5, 12);
+  doc.text(budgetStr, margin + 5 + bGlyphW + 1.5, curY + 14.5);
+
+  // Right: Members Splitting
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(margin + colW + 6, curY, colW, 21, 3, 3, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(margin + colW + 6, curY, colW, 21, 3, 3, 'S');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('MEMBERS SPLITTING', margin + colW + 11, curY + 6.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${memberCount} ${memberCount === 1 ? 'Traveler' : 'Travelers'}`, margin + colW + 11, curY + 14.5);
+
+  // 6. Individual Member Breakdown
+  curY = 138;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(51, 65, 85);
+  doc.text('INDIVIDUAL MEMBER BREAKDOWN', margin, curY);
+
+  curY += 4;
+  doc.setFillColor(241, 245, 249);
+  doc.rect(margin, curY, contentWidth, 7, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text('MEMBER', margin + 4, curY + 4.8);
+  doc.text('SHARE AMOUNT', margin + 65, curY + 4.8);
+  doc.text('ALLOCATION NOTE', margin + 120, curY + 4.8);
+
+  curY += 7;
+  const totalInPaise = Math.round(totalBudget * 100);
+  const basePaise = Math.floor(totalInPaise / memberCount);
+  const remPaise = totalInPaise % memberCount;
+  const isIntegerBudget = Number.isInteger(totalBudget);
+  const wholeRemainder = Math.floor(totalBudget) % memberCount;
+
+  const maxRows = Math.min(memberCount, 16);
+  for (let i = 0; i < maxRows; i++) {
+    const isOdd = i % 2 === 1;
+    if (isOdd) {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(margin, curY, contentWidth, 6.5, 'F');
+    }
+    const sharePaise = basePaise + (i < remPaise ? 1 : 0);
+    const amtFormatted = (sharePaise / 100).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+    let note = 'Standard equal share';
+    if (remPaise > 0) {
+      if (isIntegerBudget && wholeRemainder > 0 && i < wholeRemainder) {
+        note = '+₹1 remainder adjustment';
+      } else if (i < remPaise) {
+        note = '+₹0.01 remainder adjustment';
+      }
+    }
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Member ${i + 1}`, margin + 4, curY + 4.5);
+
+    // Share amount with rupee glyph
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.setDrawColor(15, 23, 42);
+    const mGlyphW = drawRupeeGlyph(doc, margin + 65, curY + 4.5, 8);
+    doc.text(amtFormatted, margin + 65 + mGlyphW + 1, curY + 4.5);
+
+    // Note
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(i < remPaise ? 180 : 100, i < remPaise ? 83 : 116, i < remPaise ? 9 : 139);
+    doc.text(note, margin + 120, curY + 4.5);
+
+    curY += 6.5;
+  }
+
+  if (memberCount > 16) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(7.5);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`+ ${memberCount - 16} additional members pay identical equal shares`, margin + 4, curY + 4);
+  }
+
+  // 7. Footer
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.3);
+  doc.line(margin, 275, pageWidth - margin, 275);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text('Globe Trotter Travel Planner • Expense Splitter Report • Page 1 of 1', pageWidth / 2, 281, { align: 'center' });
+  doc.text('This PDF reflects the active itinerary budget and member split at the time of export.', pageWidth / 2, 285, { align: 'center' });
+
+  return doc;
 }
 
 export const ExpenseSplitterModal: React.FC<ExpenseSplitterModalProps> = ({
@@ -20,6 +298,8 @@ export const ExpenseSplitterModal: React.FC<ExpenseSplitterModalProps> = ({
 
   const [memberCountInput, setMemberCountInput] = useState<string>('2');
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
+  const [shareToast, setShareToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Sync member count when modal opens or when itinerary changes
   useEffect(() => {
@@ -128,6 +408,75 @@ export const ExpenseSplitterModal: React.FC<ExpenseSplitterModalProps> = ({
     }
   }
 
+  // Share as PDF handler: Web Share API on mobile, fallback download on desktop/unsupported
+  const handleSharePdf = async () => {
+    if (!hasBudget || !isValid) return;
+
+    setIsGeneratingPdf(true);
+    setShareToast(null);
+
+    try {
+      const doc = generateExpenseSplitPdf({
+        trip,
+        totalBudget,
+        memberCount,
+        perPersonShare,
+        formattedPerPerson,
+        remainderMessage,
+      });
+
+      const safeTripName = (trip.name || 'itinerary')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+      const filename = `${safeTripName}-expense-split.pdf`;
+
+      const pdfBlob = doc.output('blob');
+      const file = new File([pdfBlob], filename, { type: 'application/pdf' });
+
+      let shared = false;
+
+      // Check if Web Share API with files is supported (mobile browsers, etc.)
+      if (
+        typeof navigator !== 'undefined' &&
+        navigator.share &&
+        typeof navigator.canShare === 'function' &&
+        navigator.canShare({ files: [file] })
+      ) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: `${trip.name} - Expense Split`,
+            text: `Expense split for ${trip.name} (Budget: ₹${totalBudget.toLocaleString('en-IN')}, Per person: ₹${formattedPerPerson})`,
+          });
+          shared = true;
+          setShareToast({ type: 'success', message: 'Shared PDF successfully!' });
+        } catch (shareErr: any) {
+          // If the user cancelled the native share sheet, do not trigger fallback download
+          if (shareErr?.name === 'AbortError') {
+            setIsGeneratingPdf(false);
+            return;
+          }
+          // Otherwise fall back to direct file download
+        }
+      }
+
+      if (!shared) {
+        // Fallback: direct download
+        doc.save(filename);
+        setShareToast({ type: 'success', message: 'PDF downloaded!' });
+      }
+    } catch (error) {
+      console.error('Failed to generate expense split PDF:', error);
+      setShareToast({ type: 'error', message: 'Failed to generate PDF. Please try again.' });
+    } finally {
+      setIsGeneratingPdf(false);
+      setTimeout(() => {
+        setShareToast(null);
+      }, 3500);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-200"
@@ -195,6 +544,18 @@ export const ExpenseSplitterModal: React.FC<ExpenseSplitterModalProps> = ({
                   <span>Set Itinerary Budget</span>
                 </button>
               )}
+
+              {/* Disabled Share as PDF button when budget is empty/0 */}
+              <button
+                type="button"
+                disabled
+                className="min-h-[44px] w-full px-4 py-2.5 rounded-2xl bg-slate-100 text-slate-400 text-xs sm:text-sm font-semibold flex items-center justify-center space-x-2 border border-slate-200 cursor-not-allowed opacity-60"
+                aria-label="Share as PDF (Disabled - No Budget)"
+                title="Add a budget to this itinerary to split expenses and share PDF"
+              >
+                <Share2 className="w-4 h-4 text-slate-400" />
+                <span>Share as PDF</span>
+              </button>
             </div>
           ) : (
             <>
@@ -224,6 +585,54 @@ export const ExpenseSplitterModal: React.FC<ExpenseSplitterModalProps> = ({
                   <div className="mt-3.5 pt-3 border-t border-emerald-200/60 flex items-center justify-center space-x-1.5 text-xs font-medium text-emerald-900">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>{remainderMessage}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Share as PDF Button - Placed inside Expense Splitter modal, below the per-person share */}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleSharePdf}
+                  disabled={!hasBudget || !isValid || isGeneratingPdf}
+                  className="min-h-[44px] w-full px-4 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-sky-600 hover:from-emerald-700 hover:via-teal-700 hover:to-sky-700 active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 text-white text-xs sm:text-sm font-semibold shadow-xs flex items-center justify-center space-x-2 transition-all cursor-pointer border border-emerald-600/30"
+                  aria-label="Share as PDF"
+                  title={
+                    !hasBudget
+                      ? 'Add a budget to share PDF'
+                      : !isValid
+                      ? 'Enter a valid member count to share PDF'
+                      : 'Share or download expense split PDF'
+                  }
+                >
+                  {isGeneratingPdf ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Generating PDF...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="w-4 h-4 text-emerald-100" />
+                      <span>Share as PDF</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Toast status feedback */}
+                {shareToast && (
+                  <div
+                    className={`p-3 rounded-xl text-xs font-medium flex items-center space-x-2 animate-in fade-in duration-150 ${
+                      shareToast.type === 'success'
+                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                        : 'bg-rose-50 text-rose-800 border border-rose-200'
+                    }`}
+                  >
+                    {shareToast.type === 'success' ? (
+                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    )}
+                    <span>{shareToast.message}</span>
                   </div>
                 )}
               </div>
