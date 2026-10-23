@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Sparkles, MapPin, Calendar, Clock, IndianRupee, ArrowUp, ArrowDown, Trash2, Edit3, Train, Plane, Car, Bus, Ship, Check, AlertCircle, ChevronDown, ChevronUp, Eye, Compass, BookOpen, X, Globe, RotateCcw, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Plus, Sparkles, MapPin, Calendar, Clock, IndianRupee, ArrowUp, ArrowDown, Trash2, Edit3, Train, Plane, Car, Bus, Ship, Check, AlertCircle, ChevronDown, ChevronUp, Eye, Compass, BookOpen, X, Globe, RotateCcw, ArrowRight, CheckCircle2, Users } from 'lucide-react';
 import { Trip, Stop, Activity } from '../types/travel';
 import { api } from '../lib/api';
 import { DestinationScopeModal } from './DestinationScopeModal';
@@ -12,6 +12,7 @@ interface ItineraryBuilderViewProps {
   onOpenOptimizer: () => void;
   onViewItinerary: () => void;
   onOpenCatalogSearch: (cityHint?: string) => void;
+  onOpenMembers?: () => void;
 }
 
 export const ItineraryBuilderView: React.FC<ItineraryBuilderViewProps> = ({
@@ -20,6 +21,7 @@ export const ItineraryBuilderView: React.FC<ItineraryBuilderViewProps> = ({
   onOpenOptimizer,
   onViewItinerary,
   onOpenCatalogSearch,
+  onOpenMembers,
 }) => {
   const [showAddStopModal, setShowAddStopModal] = useState(false);
   const [stopToEdit, setStopToEdit] = useState<Stop | null>(null);
@@ -437,6 +439,16 @@ export const ItineraryBuilderView: React.FC<ItineraryBuilderViewProps> = ({
 
         {/* Builder Toolbar Actions */}
         <div className="flex flex-wrap items-center gap-2.5">
+          {onOpenMembers && (
+            <button
+              onClick={onOpenMembers}
+              className="px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold border border-indigo-200/80 shadow-2xs flex items-center space-x-1.5 transition-all cursor-pointer"
+              title="Invite or manage trip collaborators"
+            >
+              <Users className="w-4 h-4 text-indigo-600" />
+              <span>Trip Members ({trip.members?.length || 1})</span>
+            </button>
+          )}
           <button
             onClick={onOpenOptimizer}
             className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white text-xs font-semibold shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer"

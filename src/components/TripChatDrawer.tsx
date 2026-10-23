@@ -81,7 +81,7 @@ export const TripChatDrawer: React.FC<TripChatDrawerProps> = ({
       const errMsg: ChatMessage = {
         id: String(Date.now() + 1),
         role: 'assistant',
-        content: 'I had trouble connecting to the travel knowledge base. Please try asking again in a moment.',
+        content: 'AI unavailable',
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, errMsg]);

@@ -95,7 +95,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
       const res = (await Promise.race([fetchPromise, timeoutPromise])) as { itinerary: AIItineraryPlan };
       setGeneratedPlan(res.itinerary);
     } catch (err: any) {
-      setError(err.message || 'Failed to generate itinerary. Please try again.');
+      setError(err?.message?.includes('AI unavailable') ? 'AI unavailable' : (err?.message || 'AI unavailable'));
     } finally {
       setLoading(false);
     }

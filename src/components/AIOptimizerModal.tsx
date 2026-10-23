@@ -38,7 +38,7 @@ export const AIOptimizerModal: React.FC<AIOptimizerModalProps> = ({
       const res = (await Promise.race([fetchPromise, timeoutPromise])) as { optimization: OptimizationResult };
       setResult(res.optimization);
     } catch (err: any) {
-      setError(err.message || 'Failed to analyze itinerary. Please try again.');
+      setError(err?.message?.includes('AI unavailable') ? 'AI unavailable' : (err?.message || 'AI unavailable'));
     } finally {
       setLoading(false);
     }

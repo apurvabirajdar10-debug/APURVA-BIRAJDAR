@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Sparkles, MapPin, Calendar, IndianRupee, Edit3, Trash2, Copy, Share2, Eye, Search, AlertCircle, Check, Filter } from 'lucide-react';
+import { Plus, Sparkles, MapPin, Calendar, IndianRupee, Edit3, Trash2, Copy, Share2, Eye, Search, AlertCircle, Check, Filter, Users, UserPlus, X } from 'lucide-react';
 import { Trip } from '../types/travel';
 import { api } from '../lib/api';
 
@@ -12,6 +12,8 @@ interface TripListViewProps {
   onTripDeleted: (tripId: number) => void;
   onTripDuplicated: (newTrip: Trip) => void;
   onViewPublic: (slug: string) => void;
+  onOpenMembers?: (trip: Trip) => void;
+  onTripJoined?: (joinedTrip: Trip) => void;
 }
 
 export const TripListView: React.FC<TripListViewProps> = ({
@@ -23,12 +25,58 @@ export const TripListView: React.FC<TripListViewProps> = ({
   onTripDeleted,
   onTripDuplicated,
   onViewPublic,
+  onOpenMembers,
+  onTripJoined,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'upcoming' | 'inprogress' | 'past'>('all');
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [copyingId, setCopyingId] = useState<number | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Join trip with code modal state
+  const [joinModalOpen, setJoinModalOpen] = useState(false);
+  const [inviteInput, setInviteInput] = useState('');
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+
+  const handleJoinWithCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanInput = inviteInput.trim();
+    if (!cleanInput) {
+      setJoinError('Please enter an invite code or invite link.');
+      return;
+    }
+
+    // Extract code if user pasted a full URL (e.g. ?join=GT-XXXXXX)
+    let extractedCode = cleanInput;
+    if (cleanInput.includes('join=')) {
+      try {
+        const url = new URL(cleanInput.startsWith('http') ? cleanInput : `http://dummy.io/${cleanInput}`);
+        extractedCode = url.searchParams.get('join') || cleanInput;
+      } catch {
+        extractedCode = cleanInput.split('join=')[1]?.split('&')[0] || cleanInput;
+      }
+    }
+
+    setJoining(true);
+    setJoinError(null);
+
+    try {
+      const res = await api.joinTripByInvite(extractedCode);
+      showToast(`Joined trip: ${res.trip.name}!`);
+      setJoinModalOpen(false);
+      setInviteInput('');
+      if (onTripJoined) {
+        onTripJoined(res.trip);
+      }
+      onSelectTrip(res.trip, 'builder');
+    } catch (err: any) {
+      setJoinError(err.message || 'Failed to join trip. Please check your invite code.');
+    } finally {
+      setJoining(false);
+    }
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -107,6 +155,18 @@ export const TripListView: React.FC<TripListViewProps> = ({
           </p>
         </div>
         <div className="flex items-center space-x-2.5">
+          <button
+            onClick={() => {
+              setJoinError(null);
+              setInviteInput('');
+              setJoinModalOpen(true);
+            }}
+            className="px-3.5 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold border border-indigo-200/80 shadow-2xs flex items-center space-x-1.5 active:scale-95 transition-all cursor-pointer"
+            title="Join an existing group trip with an invite code or link"
+          >
+            <UserPlus className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Join with Code</span>
+          </button>
           <button
             onClick={onOpenAIAssistant}
             className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-sm flex items-center space-x-1.5 active:scale-95 transition-all"
@@ -206,6 +266,12 @@ export const TripListView: React.FC<TripListViewProps> = ({
                       </span>
 
                       <div className="flex items-center space-x-1.5">
+                        {trip.members && trip.members.length > 1 && (
+                          <span className="px-2 py-0.5 rounded-full bg-indigo-600/90 backdrop-blur-md text-white text-[10px] font-bold flex items-center space-x-1 shadow-xs">
+                            <Users className="w-3 h-3 text-indigo-200" />
+                            <span>{trip.members.length}</span>
+                          </span>
+                        )}
                         {isCurrent && (
                           <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wider animate-pulse">
                             Active Now
@@ -357,6 +423,15 @@ export const TripListView: React.FC<TripListViewProps> = ({
                       >
                         <Copy className="w-3.5 h-3.5" />
                       </button>
+                      {onOpenMembers && (
+                        <button
+                          onClick={() => onOpenMembers(trip)}
+                          className="p-1.5 text-slate-500 hover:text-indigo-600 rounded-lg hover:bg-slate-100 transition-colors"
+                          title="Trip Collaborators & Members"
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button
                         onClick={() => handleCopyShareLink(trip)}
                         className="p-1.5 text-slate-500 hover:text-sky-600 rounded-lg hover:bg-slate-100 transition-colors"
@@ -404,6 +479,75 @@ export const TripListView: React.FC<TripListViewProps> = ({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Join Trip with Code / Link Modal */}
+      {joinModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden">
+            <div className="bg-gradient-to-r from-indigo-600 to-sky-600 p-6 text-white relative">
+              <button
+                onClick={() => setJoinModalOpen(false)}
+                className="absolute top-4 right-4 p-1.5 rounded-full text-white/80 hover:text-white hover:bg-white/20 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-inner">
+                  <UserPlus className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold font-serif-heading">Join a Group Trip</h3>
+                  <p className="text-xs text-white/80">Enter the 6-character code or link shared with you</p>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleJoinWithCode} className="p-6 space-y-4">
+              {joinError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                  <span>{joinError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Invite Code or Link
+                </label>
+                <input
+                  type="text"
+                  value={inviteInput}
+                  onChange={(e) => setInviteInput(e.target.value)}
+                  placeholder="e.g. GT-ABC123 or paste invite link"
+                  required
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Ask the trip organizer for the trip's GT invite code or share link.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setJoinModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={joining}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all flex items-center space-x-1.5 cursor-pointer disabled:opacity-60"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>{joining ? 'Joining...' : 'Join Trip'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

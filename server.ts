@@ -3,7 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
-import { initDatabase, dbOps, hashPassword } from './src/server/db.ts';
+import { initDatabase, dbOps, hashPassword, signJwt, verifyJwt } from './src/server/db.ts';
 import { getDistributedAttractionsForCity } from './src/data/cityAttractions.ts';
 
 dotenv.config();
@@ -27,22 +27,15 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Middleware for session auth
-function getUserIdFromReq(req: express.Request, allowDefault: false): number | null;
-function getUserIdFromReq(req: express.Request, allowDefault?: true): number;
-function getUserIdFromReq(req: express.Request, allowDefault = true): number | null {
+// Middleware for signed session / JWT auth (Never defaults to user 1 for unauthenticated requests)
+function getUserIdFromReq(req: express.Request): number | null {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
-    const parsed = parseInt(token, 10);
-    if (!isNaN(parsed) && parsed > 0) return parsed;
+    const payload = verifyJwt(token);
+    if (payload && payload.userId) return payload.userId;
   }
-  const customId = req.headers['x-user-id'];
-  if (customId && typeof customId === 'string') {
-    const parsed = parseInt(customId, 10);
-    if (!isNaN(parsed) && parsed > 0) return parsed;
-  }
-  return allowDefault ? 1 : null;
+  return null;
 }
 
 /* ==========================================================================
@@ -68,9 +61,11 @@ app.post('/api/auth/login', (req, res) => {
     }
 
     const safeUser = dbOps.getUserById(user.id);
+    const token = signJwt({ userId: user.id, email: user.email });
+
     return res.json({
       user: safeUser,
-      token: String(user.id),
+      token,
       message: 'Logged in successfully',
     });
   } catch (err: any) {
@@ -103,10 +98,11 @@ app.post('/api/auth/signup', (req, res) => {
 
     const hashed = hashPassword(password);
     const newUser = dbOps.createUser(name.trim(), trimmedEmail, hashed);
+    const token = signJwt({ userId: newUser.id, email: newUser.email });
 
     return res.status(201).json({
       user: newUser,
-      token: String(newUser.id),
+      token,
       message: 'Account created successfully',
     });
   } catch (err: any) {
@@ -118,7 +114,7 @@ app.post('/api/auth/signup', (req, res) => {
 // GET /api/auth/me
 app.get('/api/auth/me', (req, res) => {
   try {
-    const userId = getUserIdFromReq(req, false);
+    const userId = getUserIdFromReq(req);
     if (!userId) {
       return res.status(401).json({ error: 'Not authenticated' });
     }
@@ -132,22 +128,16 @@ app.get('/api/auth/me', (req, res) => {
   }
 });
 
-// POST /api/auth/forgot-password
+// POST /api/auth/forgot-password (removes temporary password and reset codes for security)
 app.post('/api/auth/forgot-password', (req, res) => {
   try {
     const { email } = req.body;
     if (!email) {
       return res.status(400).json({ error: 'Email is required' });
     }
-    const user = dbOps.getUserByEmail(email.toLowerCase().trim());
-    if (!user) {
-      // Don't reveal account existence for privacy, return success message
-      return res.json({ message: 'If this email exists in our records, a password reset link has been dispatched.' });
-    }
-    // Set a demo recovery temporary pass
+    // Return standard generic message without exposing internal codes or temp passwords
     return res.json({
-      message: `Password reset link sent to ${email}. For instant testing, you can use temporary password: traveler123`,
-      tempResetCode: 'GT-' + Math.floor(100000 + Math.random() * 900000),
+      message: 'If this email exists in our records, a password reset link has been dispatched.',
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to process password reset' });
@@ -158,6 +148,9 @@ app.post('/api/auth/forgot-password', (req, res) => {
 app.put('/api/user/profile', (req, res) => {
   try {
     const userId = getUserIdFromReq(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
     const { name, photo_url, language, currency, saved_destinations } = req.body;
     const updated = dbOps.updateUserProfile(userId, { name, photo_url, language, currency, saved_destinations });
     return res.json({ user: updated, message: 'Profile updated successfully' });
@@ -170,10 +163,13 @@ app.put('/api/user/profile', (req, res) => {
    TRIP API ROUTES
    ========================================================================== */
 
-// GET /api/trips (list all trips for current user)
+// GET /api/trips (list all trips for current user including group trips)
 app.get('/api/trips', (req, res) => {
   try {
     const userId = getUserIdFromReq(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
     const trips = dbOps.getTripsByUser(userId);
     return res.json({ trips });
   } catch (err: any) {
@@ -186,6 +182,9 @@ app.get('/api/trips', (req, res) => {
 app.post('/api/trips', (req, res) => {
   try {
     const userId = getUserIdFromReq(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
     const { name, start_date, end_date, description, cover_image, budget_total, is_public } = req.body;
 
     if (!name || !name.trim()) {
@@ -215,7 +214,7 @@ app.post('/api/trips', (req, res) => {
   }
 });
 
-// GET /api/trips/:id (get single trip with full stops, activities, expenses)
+// GET /api/trips/:id (get single trip with full stops, activities, expenses, members)
 app.get('/api/trips/:id', (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -225,6 +224,15 @@ app.get('/api/trips/:id', (req, res) => {
     if (!trip) {
       return res.status(404).json({ error: 'Trip not found' });
     }
+
+    // If trip is private, verify user is owner or member
+    if (!trip.is_public) {
+      const userId = getUserIdFromReq(req);
+      if (!userId || !dbOps.isUserAllowedTrip(id, userId)) {
+        return res.status(403).json({ error: 'Access denied to this private itinerary' });
+      }
+    }
+
     return res.json({ trip });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to load trip' });
@@ -234,8 +242,15 @@ app.get('/api/trips/:id', (req, res) => {
 // PUT /api/trips/:id (update trip)
 app.put('/api/trips/:id', (req, res) => {
   try {
+    const userId = getUserIdFromReq(req);
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid trip ID' });
+
+    if (!dbOps.isUserAllowedTrip(id, userId)) {
+      return res.status(403).json({ error: 'Permission denied to edit this trip' });
+    }
 
     const { name, start_date, end_date, description, cover_image, budget_total, is_public } = req.body;
 
@@ -263,8 +278,15 @@ app.put('/api/trips/:id', (req, res) => {
 // DELETE /api/trips/:id
 app.delete('/api/trips/:id', (req, res) => {
   try {
+    const userId = getUserIdFromReq(req);
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid trip ID' });
+
+    if (!dbOps.isUserAllowedTrip(id, userId)) {
+      return res.status(403).json({ error: 'Permission denied to delete this trip' });
+    }
 
     dbOps.deleteTrip(id);
     return res.json({ success: true, message: 'Trip and associated stops deleted' });
@@ -277,6 +299,8 @@ app.delete('/api/trips/:id', (req, res) => {
 app.post('/api/trips/:id/copy', (req, res) => {
   try {
     const userId = getUserIdFromReq(req);
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
     const tripId = parseInt(req.params.id, 10);
     if (isNaN(tripId)) return res.status(400).json({ error: 'Invalid trip ID' });
 
@@ -300,6 +324,121 @@ app.get('/api/trips/slug/:slug', (req, res) => {
     return res.json({ trip });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to load public trip' });
+  }
+});
+
+/* ==========================================================================
+   GROUP TRIPS: MEMBERS & INVITE ROUTES
+   ========================================================================== */
+
+// GET /api/trips/:id/members
+app.get('/api/trips/:id/members', (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    if (isNaN(tripId)) return res.status(400).json({ error: 'Invalid trip ID' });
+
+    const members = dbOps.getTripMembers(tripId);
+    return res.json({ members });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch trip members' });
+  }
+});
+
+// POST /api/trips/:id/members (invite a member by email)
+app.post('/api/trips/:id/members', (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+    const tripId = parseInt(req.params.id, 10);
+    if (isNaN(tripId)) return res.status(400).json({ error: 'Invalid trip ID' });
+
+    if (!dbOps.isUserAllowedTrip(tripId, userId)) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    const { email, name, role } = req.body;
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: 'Email address is required' });
+    }
+
+    const member = dbOps.addTripMember(tripId, {
+      email: email.trim(),
+      name: name?.trim(),
+      role: role || 'editor',
+      invited_by: userId,
+    });
+
+    const members = dbOps.getTripMembers(tripId);
+    return res.status(201).json({ member, members, message: `Invited ${email} to trip` });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to add trip member' });
+  }
+});
+
+// DELETE /api/trips/:id/members/:memberId (remove a member)
+app.delete('/api/trips/:id/members/:memberId', (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+    const tripId = parseInt(req.params.id, 10);
+    const memberId = parseInt(req.params.memberId, 10);
+
+    if (!dbOps.isUserAllowedTrip(tripId, userId)) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    dbOps.removeTripMember(tripId, memberId);
+    const members = dbOps.getTripMembers(tripId);
+    return res.json({ members, message: 'Member removed from trip' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to remove member' });
+  }
+});
+
+// GET /api/trips/join/:inviteCode (preview trip by invite code)
+app.get('/api/trips/join/:inviteCode', (req, res) => {
+  try {
+    const { inviteCode } = req.params;
+    const trip = dbOps.getTripByInviteCode(inviteCode);
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip invite code not found or expired' });
+    }
+    return res.json({
+      trip: {
+        id: trip.id,
+        name: trip.name,
+        cover_image: trip.cover_image,
+        start_date: trip.start_date,
+        end_date: trip.end_date,
+        user_name: trip.user_name,
+        destinations_count: trip.destinations_count,
+        invite_code: trip.invite_code,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to check invite code' });
+  }
+});
+
+// POST /api/trips/join/:inviteCode (join trip by invite code)
+app.post('/api/trips/join/:inviteCode', (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'Please log in to accept the trip invite' });
+    }
+
+    const { inviteCode } = req.params;
+    const joinedTrip = dbOps.joinTripByInviteCode(inviteCode, userId);
+    if (!joinedTrip) {
+      return res.status(404).json({ error: 'Invalid invite code' });
+    }
+
+    return res.json({ trip: joinedTrip, message: `Successfully joined ${joinedTrip.name}` });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to join trip' });
   }
 });
 
@@ -512,11 +651,11 @@ app.get('/api/trips/:id/expenses', (req, res) => {
   }
 });
 
-// POST /api/trips/:id/expenses (record expense)
+// POST /api/trips/:id/expenses (record expense with split details)
 app.post('/api/trips/:id/expenses', (req, res) => {
   try {
     const tripId = parseInt(req.params.id, 10);
-    const { stop_id, title, category, amount, currency, date, paid_by, notes } = req.body;
+    const { stop_id, title, category, amount, currency, date, paid_by, paid_by_user_id, split_type, splits, notes } = req.body;
 
     if (!title || !category || amount === undefined || !date) {
       return res.status(400).json({ error: 'Title, category, amount, and date are required' });
@@ -528,9 +667,12 @@ app.post('/api/trips/:id/expenses', (req, res) => {
       title: title.trim(),
       category,
       amount: Number(amount) || 0,
-      currency: currency || 'USD',
+      currency: currency || 'INR',
       date,
       paid_by,
+      paid_by_user_id: paid_by_user_id ? Number(paid_by_user_id) : null,
+      split_type: split_type || 'equal',
+      splits: splits || [],
       notes,
     });
 
@@ -573,6 +715,66 @@ app.delete('/api/expenses/:id', (req, res) => {
   }
 });
 
+// GET /api/trips/:id/balances (Member net balances & simplified debt settlements)
+app.get('/api/trips/:id/balances', (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    if (isNaN(tripId)) return res.status(400).json({ error: 'Invalid trip ID' });
+
+    const balances = dbOps.getTripBalances(tripId);
+    if (!balances) return res.status(404).json({ error: 'Trip not found' });
+
+    return res.json(balances);
+  } catch (err: any) {
+    console.error('Failed to compute balances:', err);
+    return res.status(500).json({ error: 'Failed to compute balances' });
+  }
+});
+
+// POST /api/trips/:id/settlements (Record debt settlement / settle up)
+app.post('/api/trips/:id/settlements', (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    if (isNaN(tripId)) return res.status(400).json({ error: 'Invalid trip ID' });
+
+    const { from_user_id, from_name, to_user_id, to_name, amount, currency, date, notes } = req.body;
+    if (!from_name || !to_name || amount === undefined || Number(amount) <= 0) {
+      return res.status(400).json({ error: 'from_name, to_name, and a valid amount are required' });
+    }
+
+    const settlement = dbOps.createSettlement({
+      trip_id: tripId,
+      from_user_id: from_user_id ? Number(from_user_id) : null,
+      from_name: String(from_name).trim(),
+      to_user_id: to_user_id ? Number(to_user_id) : null,
+      to_name: String(to_name).trim(),
+      amount: Number(amount),
+      currency: currency || 'INR',
+      date: date || new Date().toISOString().split('T')[0],
+      notes: notes || 'Settled up',
+    });
+
+    const balances = dbOps.getTripBalances(tripId);
+    return res.status(201).json({ settlement, balances, message: 'Debt settled successfully' });
+  } catch (err: any) {
+    console.error('Settlement error:', err);
+    return res.status(500).json({ error: 'Failed to record settlement' });
+  }
+});
+
+// DELETE /api/trips/:id/settlements/:settlementId
+app.delete('/api/trips/:id/settlements/:settlementId', (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    const settlementId = parseInt(req.params.settlementId, 10);
+    dbOps.deleteSettlement(settlementId);
+    const balances = dbOps.getTripBalances(tripId);
+    return res.json({ success: true, balances, message: 'Settlement deleted' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to delete settlement' });
+  }
+});
+
 /* ==========================================================================
    CITY & ACTIVITY CATALOG SEARCH API
    ========================================================================== */
@@ -609,6 +811,10 @@ app.post('/api/ai/generate-itinerary', async (req, res) => {
       return res.status(400).json({ error: 'Destination or travel goal is required' });
     }
 
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(503).json({ error: 'AI unavailable' });
+    }
+
     const duration = parseInt(duration_days, 10) || 7;
     const effectiveStart = start_date || new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
 
@@ -624,83 +830,79 @@ Create a realistic, exciting, and balanced multi-city travel itinerary for:
 Requirements:
 - Plan 2 to 4 interconnected city stops within this duration.
 - For each stop, assign realistic arrival and departure dates starting sequentially from ${effectiveStart}.
-- For each stop, recommend 2 to 3 distinct activities per day categorized by time_slot (morning, afternoon, evening), realistic costs in USD, duration, and category (sightseeing, food, culture, adventure, relaxation).
+- For each stop, recommend 2 to 3 distinct activities per day categorized by time_slot (morning, afternoon, evening), realistic costs in INR, duration, and category (sightseeing, food, culture, adventure, relaxation).
 - Specify transport modes between consecutive cities (train, flight, car, bus).
 - Provide an estimated total budget target.
 `;
 
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: {
-            systemInstruction: 'You are an elite travel concierge crafting world-class multi-city travel itineraries. Return ONLY valid JSON matching the requested structure.',
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                description: { type: Type.STRING },
-                estimated_budget: { type: Type.NUMBER },
-                cover_image: { type: Type.STRING },
-                stops: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      city_name: { type: Type.STRING },
-                      country: { type: Type.STRING },
-                      start_date: { type: Type.STRING },
-                      end_date: { type: Type.STRING },
-                      transport_mode: { type: Type.STRING },
-                      transport_notes: { type: Type.STRING },
-                      activities: {
-                        type: Type.ARRAY,
-                        items: {
-                          type: Type.OBJECT,
-                          properties: {
-                            title: { type: Type.STRING },
-                            description: { type: Type.STRING },
-                            date: { type: Type.STRING },
-                            time_slot: { type: Type.STRING },
-                            category: { type: Type.STRING },
-                            cost: { type: Type.NUMBER },
-                            duration_hours: { type: Type.NUMBER },
-                            location: { type: Type.STRING },
-                          },
-                          required: ['title', 'date', 'time_slot', 'cost', 'category'],
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: prompt,
+        config: {
+          systemInstruction: 'You are an elite travel concierge crafting world-class multi-city travel itineraries. Return ONLY valid JSON matching the requested structure.',
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              description: { type: Type.STRING },
+              estimated_budget: { type: Type.NUMBER },
+              cover_image: { type: Type.STRING },
+              stops: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    city_name: { type: Type.STRING },
+                    country: { type: Type.STRING },
+                    start_date: { type: Type.STRING },
+                    end_date: { type: Type.STRING },
+                    transport_mode: { type: Type.STRING },
+                    transport_notes: { type: Type.STRING },
+                    activities: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          title: { type: Type.STRING },
+                          description: { type: Type.STRING },
+                          date: { type: Type.STRING },
+                          time_slot: { type: Type.STRING },
+                          category: { type: Type.STRING },
+                          cost: { type: Type.NUMBER },
+                          duration_hours: { type: Type.NUMBER },
+                          location: { type: Type.STRING },
                         },
+                        required: ['title', 'date', 'time_slot', 'cost', 'category'],
                       },
                     },
-                    required: ['city_name', 'country', 'start_date', 'end_date', 'activities'],
                   },
+                  required: ['city_name', 'country', 'start_date', 'end_date', 'activities'],
                 },
               },
-              required: ['name', 'description', 'estimated_budget', 'stops'],
             },
+            required: ['name', 'description', 'estimated_budget', 'stops'],
           },
-        });
+        },
+      });
 
-        const text = response.text;
-        if (text) {
-          const parsed = JSON.parse(text);
-          if (!parsed.cover_image) {
-            parsed.cover_image = 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80';
-          }
-          return res.json({ itinerary: parsed });
+      const text = response.text;
+      if (text) {
+        const parsed = JSON.parse(text);
+        if (!parsed.cover_image) {
+          parsed.cover_image = 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80';
         }
-      } catch (geminiErr: any) {
-        console.warn('Gemini generateContent error, activating fallback generator:', geminiErr?.message);
+        return res.json({ itinerary: parsed });
       }
+      return res.status(503).json({ error: 'AI unavailable' });
+    } catch (geminiErr: any) {
+      console.warn('Gemini generateContent error:', geminiErr?.message);
+      return res.status(503).json({ error: 'AI unavailable' });
     }
-
-    // High quality dynamic fallback generator if Gemini is unavailable
-    const fallback = generateSmartFallbackItinerary(destination, duration, effectiveStart, budget_level, interests);
-    return res.json({ itinerary: fallback, note: 'Generated with Globe Trotter itinerary engine' });
   } catch (err: any) {
     console.error('AI generate itinerary error:', err);
-    return res.status(500).json({ error: 'Failed to generate itinerary. Please try again.' });
+    return res.status(503).json({ error: 'AI unavailable' });
   }
 });
 
@@ -709,6 +911,10 @@ app.post('/api/ai/optimize-itinerary', async (req, res) => {
   try {
     const { trip_id } = req.body;
     if (!trip_id) return res.status(400).json({ error: 'trip_id is required' });
+
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(503).json({ error: 'AI unavailable' });
+    }
 
     const trip = dbOps.getTripById(Number(trip_id));
     if (!trip) return res.status(404).json({ error: 'Trip not found' });
@@ -728,9 +934,8 @@ app.post('/api/ai/optimize-itinerary', async (req, res) => {
       expenses: trip.expenses?.map((e: any) => `${e.title}: ₹${e.amount} (${e.category})`),
     };
 
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        const prompt = `
+    try {
+      const prompt = `
 Analyze this multi-city travel itinerary for efficiency, budget optimization, sequencing, and pacing:
 ${JSON.stringify(summaryData, null, 2)}
 
@@ -746,92 +951,49 @@ Provide an evaluation in JSON:
   - actionable_tip: practical tip the traveler can apply
 `;
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: {
-            systemInstruction: 'You are an expert travel optimizer. Return ONLY valid JSON.',
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                score: { type: Type.INTEGER },
-                summary: { type: Type.STRING },
-                savings_potential: { type: Type.NUMBER },
-                suggestions: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      category: { type: Type.STRING },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      impact: { type: Type.STRING },
-                      actionable_tip: { type: Type.STRING },
-                    },
-                    required: ['category', 'title', 'description', 'impact'],
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: prompt,
+        config: {
+          systemInstruction: 'You are an expert travel optimizer. Return ONLY valid JSON.',
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              score: { type: Type.INTEGER },
+              summary: { type: Type.STRING },
+              savings_potential: { type: Type.NUMBER },
+              suggestions: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    category: { type: Type.STRING },
+                    title: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    impact: { type: Type.STRING },
+                    actionable_tip: { type: Type.STRING },
                   },
+                  required: ['category', 'title', 'description', 'impact'],
                 },
               },
-              required: ['score', 'summary', 'suggestions'],
             },
+            required: ['score', 'summary', 'suggestions'],
           },
-        });
+        },
+      });
 
-        const text = response.text;
-        if (text) {
-          return res.json({ optimization: JSON.parse(text) });
-        }
-      } catch (geminiErr: any) {
-        console.warn('Gemini optimization error, using fallback:', geminiErr?.message);
+      const text = response.text;
+      if (text) {
+        return res.json({ optimization: JSON.parse(text) });
       }
+      return res.status(503).json({ error: 'AI unavailable' });
+    } catch (geminiErr: any) {
+      console.warn('Gemini optimization error:', geminiErr?.message);
+      return res.status(503).json({ error: 'AI unavailable' });
     }
-
-    // Fallback optimization analysis
-    const totalSpent = trip.total_spent || 0;
-    const budget = trip.budget_total || 3000;
-    const isOver = totalSpent > budget;
-    const stopCount = trip.stops?.length || 1;
-
-    const fallbackResult = {
-      score: isOver ? 74 : (stopCount >= 2 ? 91 : 82),
-      summary: `Your ${trip.name} itinerary has strong destination selection with ${stopCount} stop(s). ${isOver ? 'Expenses currently exceed the allocated budget, so cost adjustments are advised.' : 'Pacing and spending are well balanced.'}`,
-      savings_potential: Math.max(0, Math.round(budget * 0.12)),
-      suggestions: [
-        {
-          category: 'budget',
-          title: 'Bundle City Museum & Transit Passes',
-          description: 'Purchasing combined city passes for museums and metro rides saves up to 25% compared to individual tickets.',
-          impact: 'high',
-          actionable_tip: 'Check official tourism cards (e.g. Paris Museum Pass or Roma Pass) before visiting key sites.',
-        },
-        {
-          category: 'pacing',
-          title: 'Schedule a Free Afternoon Between Transit Days',
-          description: 'Consecutive travel days can cause traveler fatigue. Leaving day-gaps keeps exploration relaxed.',
-          impact: 'medium',
-          actionable_tip: 'Keep the first afternoon in each new stop free for casual neighborhood walks and dining.',
-        },
-        {
-          category: 'sequence',
-          title: 'Align High-Cost Activities to Off-Peak Hours',
-          description: 'Morning and twilight ticket slots often offer reduced crowding and discounted rates.',
-          impact: 'medium',
-          actionable_tip: 'Book primary sights at early morning openings or after 5 PM.',
-        },
-        {
-          category: 'logistics',
-          title: 'Reserve Intercity Rail Seats in Advance',
-          description: 'High-speed rail fares increase significantly closer to departure dates.',
-          impact: 'high',
-          actionable_tip: 'Lock in train reservations at least 3 weeks prior to travel.',
-        },
-      ],
-    };
-
-    return res.json({ optimization: fallbackResult });
   } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to optimize itinerary' });
+    return res.status(503).json({ error: 'AI unavailable' });
   }
 });
 
@@ -840,6 +1002,10 @@ app.post('/api/ai/trip-chat', async (req, res) => {
   try {
     const { trip_id, message, history } = req.body;
     if (!message) return res.status(400).json({ error: 'Message is required' });
+
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(503).json({ error: 'AI unavailable' });
+    }
 
     let tripContext = '';
     if (trip_id) {
@@ -854,141 +1020,49 @@ app.post('/api/ai/trip-chat', async (req, res) => {
       }
     }
 
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        const systemPrompt = `You are Globe Trotter AI, a friendly, knowledgeable concierge specialized in multi-city travel.
+    try {
+      const systemPrompt = `You are Globe Trotter AI, a friendly, knowledgeable concierge specialized in multi-city travel.
 Help the traveler with personalized suggestions, packing recommendations, local dining tips, transit guidance, and day-planning.
 Keep answers concise, inspiring, and formatted with clean bullet points when helpful.
 
 ${tripContext}`;
 
-        const contents: any[] = [];
-        if (Array.isArray(history)) {
-          for (const item of history.slice(-6)) {
-            contents.push({
-              role: item.role === 'user' ? 'user' : 'model',
-              parts: [{ text: item.content }],
-            });
-          }
+      const contents: any[] = [];
+      if (Array.isArray(history)) {
+        for (const item of history.slice(-6)) {
+          contents.push({
+            role: item.role === 'user' ? 'user' : 'model',
+            parts: [{ text: item.content }],
+          });
         }
-        contents.push({
-          role: 'user',
-          parts: [{ text: message }],
-        });
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents,
-          config: {
-            systemInstruction: systemPrompt,
-            temperature: 0.7,
-          },
-        });
-
-        const reply = response.text || 'I am ready to help you plan every detail of your journey!';
-        return res.json({ reply });
-      } catch (geminiErr: any) {
-        console.warn('Gemini chat error, falling back to heuristic assistant:', geminiErr?.message);
       }
+      contents.push({
+        role: 'user',
+        parts: [{ text: message }],
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents,
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: 0.7,
+        },
+      });
+
+      const reply = response.text;
+      if (reply) {
+        return res.json({ reply });
+      }
+      return res.status(503).json({ error: 'AI unavailable' });
+    } catch (geminiErr: any) {
+      console.warn('Gemini chat error:', geminiErr?.message);
+      return res.status(503).json({ error: 'AI unavailable' });
     }
-
-    // Heuristic response if Gemini API key is unavailable
-    const lower = message.toLowerCase();
-    let reply = `Here are some recommendations for your itinerary:`;
-
-    if (lower.includes('pack') || lower.includes('clothes') || lower.includes('weather')) {
-      reply = `**Packing Advice for Your Trip:**\n• **Layers**: Bring a light packable rain jacket and breathable layers for varying temperatures.\n• **Comfortable Walking Footwear**: Most historic city centers require 15,000+ steps per day over cobblestones.\n• **Universal Power Adapter & Power Bank**: Vital for navigation on trains and long sightseeing days.\n• **Small Crossbody Bag**: Keeps passport and cards safe while exploring crowded public markets.`;
-    } else if (lower.includes('food') || lower.includes('restaurant') || lower.includes('eat') || lower.includes('dinner')) {
-      reply = `**Local Gastronomy Tips:**\n• Seek out trattorias, bistros, or izakayas at least 2 streets away from major monuments for superior quality and authentic prices.\n• Ask locals or your hotel host for the "dish of the day" (plat du jour / piatto del giorno).\n• Remember that in many European cities, dinner typically begins after 7:30 PM, whereas bakeries open bright and early at 7:00 AM.`;
-    } else if (lower.includes('train') || lower.includes('transit') || lower.includes('flight') || lower.includes('transport')) {
-      reply = `**Transit & Intercity Connections:**\n• High-speed trains are generally faster than flying when factoring in airport security and transfers.\n• Validate paper metro/tram tickets before boarding to avoid spot-check fines.\n• Download the local city transit app or use offline Google Maps areas for stress-free subway transfers.`;
-    } else {
-      reply = `That's a fantastic question for this journey! Based on your planned stops and activities, consider grouping nearby sights together in the morning to leave afternoons open for spontaneous neighborhood wanderings and local cafes. Let me know if you would like restaurant picks, transit tricks, or budget-saving tips for any specific stop!`;
-    }
-
-    return res.json({ reply });
   } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to process chat message' });
+    return res.status(503).json({ error: 'AI unavailable' });
   }
 });
-
-// Helper for dynamic offline itinerary creation
-function generateSmartFallbackItinerary(destination: string, duration: number, startDateStr: string, budgetStyle: string, interests: string) {
-  const start = new Date(startDateStr);
-  const addDays = (d: Date, n: number) => {
-    const res = new Date(d);
-    res.setDate(res.getDate() + n);
-    return res.toISOString().split('T')[0];
-  };
-
-  // Determine cities based on query keywords
-  let stopsData: any[] = [];
-  const lower = destination.toLowerCase();
-
-  if (lower.includes('japan') || lower.includes('tokyo')) {
-    stopsData = [
-      { city: 'Tokyo', country: 'Japan', days: Math.ceil(duration * 0.45), mode: 'flight', activities: ['Shinjuku Gyoen National Garden', 'TeamLab Planets Immersive Art', 'Shibuya Crossing & Izakaya Alley'] },
-      { city: 'Kyoto', country: 'Japan', days: Math.floor(duration * 0.35), mode: 'train', activities: ['Fushimi Inari Early Morning Walk', 'Gion Historic Teahouse District', 'Arashiyama Bamboo Grove'] },
-      { city: 'Osaka', country: 'Japan', days: Math.max(1, duration - Math.ceil(duration * 0.45) - Math.floor(duration * 0.35)), mode: 'train', activities: ['Osaka Castle & Park', 'Dotonbori Street Food Tour'] },
-    ];
-  } else if (lower.includes('italy') || lower.includes('rome')) {
-    stopsData = [
-      { city: 'Rome', country: 'Italy', days: Math.ceil(duration * 0.4), mode: 'flight', activities: ['Colosseum & Forum Exploration', 'Trevi Fountain & Spanish Steps', 'Trastevere Pasta Tasting'] },
-      { city: 'Florence', country: 'Italy', days: Math.floor(duration * 0.35), mode: 'train', activities: ['Uffizi Gallery Renaissance Art', 'Duomo Terraces Climb', 'Ponte Vecchio Sunset Gelato'] },
-      { city: 'Venice', country: 'Italy', days: Math.max(1, duration - Math.ceil(duration * 0.4) - Math.floor(duration * 0.35)), mode: 'train', activities: ['Grand Canal Vaporetto Ride', 'St. Mark’s Basilica & Doge Palace'] },
-    ];
-  } else {
-    // Generic multi-city trip adapted to the user input
-    const parts = destination.split(/[,&/]/).map(s => s.trim()).filter(Boolean);
-    const mainCity = parts[0] || 'Paris';
-    const secondCity = parts[1] || 'Amsterdam';
-
-    stopsData = [
-      { city: mainCity, country: 'Destination Area', days: Math.ceil(duration / 2), mode: 'flight', activities: ['Historic City Center Walking Tour', 'Iconic Museum & Landmark Highlights', 'Traditional Culinary Dinner'] },
-      { city: secondCity, country: 'Destination Area', days: Math.floor(duration / 2), mode: 'train', activities: ['Scenic Canal & Waterfront Stroll', 'Artisanal Neighborhood Market Crawl', 'Sunset Panoramic Viewpoint'] },
-    ];
-  }
-
-  let curDate = start;
-  const stops: any[] = [];
-  let dayOffset = 0;
-
-  for (let i = 0; i < stopsData.length; i++) {
-    const s = stopsData[i];
-    const stopStart = addDays(start, dayOffset);
-    dayOffset += s.days;
-    const stopEnd = addDays(start, dayOffset);
-
-    const activities = s.activities.map((actTitle: string, actIdx: number) => ({
-      title: actTitle,
-      description: `Signature experience in ${s.city} tailored for ${interests || 'discovery'}.`,
-      date: addDays(new Date(stopStart), Math.min(actIdx, s.days - 1)),
-      time_slot: actIdx === 0 ? 'morning' : (actIdx === 1 ? 'afternoon' : 'evening'),
-      category: actIdx === 0 ? 'sightseeing' : (actIdx === 1 ? 'culture' : 'food'),
-      cost: actIdx === 1 ? 35 : (actIdx === 2 ? 45 : 15),
-      duration_hours: 2.5,
-      location: s.city,
-    }));
-
-    stops.push({
-      city_name: s.city,
-      country: s.country,
-      start_date: stopStart,
-      end_date: stopEnd,
-      transport_mode: s.mode,
-      transport_notes: i > 0 ? `Transit from ${stopsData[i - 1].city}` : 'Arrival via primary gateway',
-      activities,
-    });
-  }
-
-  return {
-    name: `${destination} Explorer`,
-    description: `A thoughtfully planned ${duration}-day journey focusing on ${interests || 'highlights, local flavors, and memorable sights'}.`,
-    estimated_budget: duration * (budgetStyle === 'Luxury' ? 380 : (budgetStyle === 'Budget' ? 120 : 220)),
-    cover_image: 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=80',
-    stops,
-  };
-}
 
 /* ==========================================================================
    FRONTEND VITE & STATIC SERVING INTEGRATION

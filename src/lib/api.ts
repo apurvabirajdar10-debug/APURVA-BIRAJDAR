@@ -1,4 +1,4 @@
-import { Trip, User, Stop, Activity, Expense, CatalogItem, OptimizationResult, AIItineraryPlan } from '../types/travel';
+import { Trip, User, Stop, Activity, Expense, CatalogItem, OptimizationResult, AIItineraryPlan, TripMember, TripBalancesResponse, Settlement } from '../types/travel';
 
 const API_BASE = '/api';
 
@@ -23,7 +23,6 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
-    headers['x-user-id'] = token;
   }
 
   const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -141,7 +140,30 @@ export const api = {
       method: 'DELETE',
     }),
 
-  // Expenses
+  // Group Trips: Members & Invites
+  getTripMembers: (tripId: number) =>
+    request<{ members: TripMember[] }>(`/trips/${tripId}/members`),
+
+  inviteTripMember: (tripId: number, data: { email: string; name?: string; role?: string }) =>
+    request<{ member: TripMember; members: TripMember[]; message: string }>(`/trips/${tripId}/members`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  removeTripMember: (tripId: number, memberId: number) =>
+    request<{ members: TripMember[]; message: string }>(`/trips/${tripId}/members/${memberId}`, {
+      method: 'DELETE',
+    }),
+
+  previewTripInvite: (inviteCode: string) =>
+    request<{ trip: Partial<Trip> }>(`/trips/join/${inviteCode}`),
+
+  joinTripByInvite: (inviteCode: string) =>
+    request<{ trip: Trip; message: string }>(`/trips/join/${inviteCode}`, {
+      method: 'POST',
+    }),
+
+  // Expenses, Balances & Settlements
   getExpenses: (tripId: number) =>
     request<{ summary: any; budget_total: number; expenses: Expense[] }>(`/trips/${tripId}/expenses`),
 
@@ -159,6 +181,20 @@ export const api = {
 
   deleteExpense: (expenseId: number) =>
     request<{ success: boolean; message: string }>(`/expenses/${expenseId}`, {
+      method: 'DELETE',
+    }),
+
+  getTripBalances: (tripId: number) =>
+    request<TripBalancesResponse>(`/trips/${tripId}/balances`),
+
+  settleUp: (tripId: number, settlementData: { from_name: string; from_user_id?: number | null; to_name: string; to_user_id?: number | null; amount: number; currency?: string; date?: string; notes?: string }) =>
+    request<{ settlement: Settlement; balances: TripBalancesResponse; message: string }>(`/trips/${tripId}/settlements`, {
+      method: 'POST',
+      body: JSON.stringify(settlementData),
+    }),
+
+  deleteSettlement: (tripId: number, settlementId: number) =>
+    request<{ success: boolean; balances: TripBalancesResponse; message: string }>(`/trips/${tripId}/settlements/${settlementId}`, {
       method: 'DELETE',
     }),
 

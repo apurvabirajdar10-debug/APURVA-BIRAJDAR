@@ -28,7 +28,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
-  const [tempCode, setTempCode] = useState<string | null>(null);
 
   const validate = (): boolean => {
     let isValid = true;
@@ -105,9 +104,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       } else if (mode === 'forgot') {
         const res = await api.forgotPassword(email.trim());
         setSuccessNotice(res.message);
-        if (res.tempResetCode) {
-          setTempCode(res.tempResetCode);
-        }
       }
     } catch (err: any) {
       setServerError(err.message || 'Authentication failed. Please check your credentials.');
@@ -231,12 +227,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 <span>Recovery Instructions Dispatched</span>
               </div>
               <p>{successNotice}</p>
-              {tempCode && (
-                <div className="mt-2 p-2 bg-emerald-100 rounded-lg text-emerald-900 font-mono text-xs flex items-center justify-between">
-                  <span>Code: <strong>{tempCode}</strong></span>
-                  <span className="text-[10px] text-emerald-700">Demo Reset</span>
-                </div>
-              )}
             </div>
           )}
 

@@ -15,6 +15,7 @@ import { PublicTripView } from './components/PublicTripView';
 import { UserProfileView } from './components/UserProfileView';
 import { LoginPage } from './components/LoginPage';
 import { BookingsView } from './components/BookingsView';
+import { TripMembersModal } from './components/TripMembersModal';
 import { Trip, User } from './types/travel';
 import { api, clearAuthToken, setAuthToken } from './lib/api';
 
@@ -32,6 +33,8 @@ export default function App() {
   const [aiAssistantModalOpen, setAiAssistantModalOpen] = useState(false);
   const [optimizerModalOpen, setOptimizerModalOpen] = useState(false);
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
+  const [tripMembersModalOpen, setTripMembersModalOpen] = useState(false);
+  const [tripForMembers, setTripForMembers] = useState<Trip | null>(null);
 
   // Discovery / Catalog search filter hint
   const [catalogSearchHint, setCatalogSearchHint] = useState<string>('');
@@ -44,9 +47,13 @@ export default function App() {
   useEffect(() => {
     async function loadData() {
       try {
-        // Check if there is a shared slug in URL params
         const urlParams = new URLSearchParams(window.location.search);
         const shareSlug = urlParams.get('share');
+        const joinCode = urlParams.get('join');
+
+        if (joinCode) {
+          sessionStorage.setItem('gt_pending_join', joinCode);
+        }
 
         if (shareSlug) {
           try {
@@ -59,20 +66,41 @@ export default function App() {
         }
 
         // Fetch authenticated user
+        let authedUser: User | null = null;
         try {
           const userRes = await api.getCurrentUser();
+          authedUser = userRes.user;
           setUser(userRes.user);
         } catch (e) {
-          // If no auth, default user can be loaded or prompted
+          // Unauthenticated
         }
 
-        // Fetch user's trips
-        const tripsRes = await api.getTrips();
-        setTrips(tripsRes.trips);
-        if (tripsRes.trips.length > 0) {
-          // Fetch full trip details for first trip to get nested stops/activities
-          const fullTripRes = await api.getTrip(tripsRes.trips[0].id);
-          setActiveTrip(fullTripRes.trip);
+        if (authedUser) {
+          // If there's a pending join code, join the trip
+          const pendingJoin = sessionStorage.getItem('gt_pending_join');
+          if (pendingJoin) {
+            try {
+              const joined = await api.joinTripByInvite(pendingJoin);
+              sessionStorage.removeItem('gt_pending_join');
+              const tripsRes = await api.getTrips();
+              setTrips(tripsRes.trips);
+              const fullJoinedTrip = await api.getTrip(joined.trip.id);
+              setActiveTrip(fullJoinedTrip.trip);
+              setCurrentTab('builder');
+              window.history.replaceState({}, '', window.location.pathname);
+              return;
+            } catch (err: any) {
+              console.warn('Could not auto-join trip with invite code:', err);
+            }
+          }
+
+          // Fetch user's trips
+          const tripsRes = await api.getTrips();
+          setTrips(tripsRes.trips);
+          if (tripsRes.trips.length > 0) {
+            const fullTripRes = await api.getTrip(tripsRes.trips[0].id);
+            setActiveTrip(fullTripRes.trip);
+          }
         }
       } catch (err) {
         console.error('Failed to initialize app data:', err);

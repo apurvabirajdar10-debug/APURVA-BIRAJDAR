@@ -41,6 +41,25 @@ export interface Stop {
   activities?: Activity[];
 }
 
+export interface TripMember {
+  id?: number;
+  trip_id: number;
+  user_id?: number | null;
+  email: string;
+  name: string;
+  role: 'owner' | 'editor' | 'viewer';
+  status: 'accepted' | 'invited';
+  photo_url?: string;
+  created_at?: string;
+}
+
+export interface ExpenseSplit {
+  userId?: number;
+  name: string;
+  amount: number;
+  percent?: number;
+}
+
 export interface Expense {
   id: number;
   trip_id: number;
@@ -51,8 +70,53 @@ export interface Expense {
   currency: string;
   date: string; // YYYY-MM-DD
   paid_by?: string;
+  paid_by_user_id?: number | null;
+  split_type?: 'equal' | 'exact' | 'percent';
+  splits?: ExpenseSplit[];
   notes?: string;
   created_at?: string;
+}
+
+export interface Settlement {
+  id: number;
+  trip_id: number;
+  from_user_id?: number | null;
+  from_name: string;
+  to_user_id?: number | null;
+  to_name: string;
+  amount: number;
+  currency: string;
+  date: string;
+  notes?: string;
+  created_at?: string;
+}
+
+export interface SimplifiedDebt {
+  fromName: string;
+  fromUserId?: number;
+  toName: string;
+  toUserId?: number;
+  amount: number;
+}
+
+export interface MemberBalanceDetail {
+  id?: number;
+  user_id?: number;
+  name: string;
+  email: string;
+  role: string;
+  photo_url?: string;
+  totalPaid: number;
+  totalOwed: number;
+  netBalance: number;
+}
+
+export interface TripBalancesResponse {
+  tripId: number;
+  totalExpenses: number;
+  members: MemberBalanceDetail[];
+  simplifiedDebts: SimplifiedDebt[];
+  settlements: Settlement[];
 }
 
 export interface Trip {
@@ -66,14 +130,18 @@ export interface Trip {
   budget_total: number;
   is_public: boolean;
   public_slug: string;
+  invite_code?: string;
   created_at?: string;
   updated_at?: string;
   stops?: Stop[];
   expenses?: Expense[];
+  members?: TripMember[];
+  user_role?: 'owner' | 'editor' | 'viewer';
   // Aggregated summary fields
   total_spent?: number;
   destinations_count?: number;
   user_name?: string;
+  user_email?: string;
 }
 
 export interface CatalogItem {

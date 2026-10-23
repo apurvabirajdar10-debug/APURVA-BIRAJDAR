@@ -34,6 +34,7 @@ export function initDatabase() {
       budget_total REAL DEFAULT 0,
       is_public INTEGER DEFAULT 0,
       public_slug TEXT UNIQUE NOT NULL,
+      invite_code TEXT UNIQUE,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -83,10 +84,42 @@ export function initDatabase() {
       currency TEXT DEFAULT 'INR',
       date TEXT NOT NULL,
       paid_by TEXT,
+      paid_by_user_id INTEGER,
+      split_type TEXT DEFAULT 'equal',
+      splits TEXT DEFAULT '[]',
       notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE,
       FOREIGN KEY (stop_id) REFERENCES stops(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS trip_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trip_id INTEGER NOT NULL,
+      user_id INTEGER,
+      email TEXT NOT NULL,
+      name TEXT NOT NULL,
+      role TEXT DEFAULT 'editor',
+      status TEXT DEFAULT 'accepted',
+      invited_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS settlements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trip_id INTEGER NOT NULL,
+      from_user_id INTEGER,
+      from_name TEXT NOT NULL,
+      to_user_id INTEGER,
+      to_name TEXT NOT NULL,
+      amount REAL NOT NULL,
+      currency TEXT DEFAULT 'INR',
+      date TEXT NOT NULL,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS catalog (
@@ -105,13 +138,81 @@ export function initDatabase() {
     );
   `);
 
+  // Column migrations for existing databases
+  try {
+    db.exec('ALTER TABLE trips ADD COLUMN invite_code TEXT;');
+  } catch {}
+  try {
+    db.exec('ALTER TABLE expenses ADD COLUMN paid_by_user_id INTEGER;');
+  } catch {}
+  try {
+    db.exec("ALTER TABLE expenses ADD COLUMN split_type TEXT DEFAULT 'equal';");
+  } catch {}
+  try {
+    db.exec("ALTER TABLE expenses ADD COLUMN splits TEXT DEFAULT '[]';");
+  } catch {}
+
+  // Backfill invite_code for any trips missing it
+  const tripsMissingCode = db.prepare("SELECT id, name FROM trips WHERE invite_code IS NULL OR invite_code = ''").all() as any[];
+  for (const t of tripsMissingCode) {
+    db.prepare('UPDATE trips SET invite_code = ? WHERE id = ?').run(generateInviteCode(), t.id);
+  }
+
+  // Ensure owners and demo members are populated in trip_members
+  const allTrips = db.prepare('SELECT id, user_id FROM trips').all() as any[];
+  for (const tr of allTrips) {
+    const owner = db.prepare('SELECT name, email FROM users WHERE id = ?').get(tr.user_id) as any;
+    if (owner) {
+      const exists = db.prepare('SELECT id FROM trip_members WHERE trip_id = ? AND (user_id = ? OR email = ?)').get(tr.id, tr.user_id, owner.email);
+      if (!exists) {
+        db.prepare(`
+          INSERT INTO trip_members (trip_id, user_id, email, name, role, status)
+          VALUES (?, ?, ?, ?, 'owner', 'accepted')
+        `).run(tr.id, tr.user_id, owner.email, owner.name);
+      }
+    }
+  }
+
   seedData();
+}
+
+// Cryptographic JWT Implementation (HMAC-SHA256)
+const JWT_SECRET = process.env.JWT_SECRET || 'globetrotter_secure_jwt_secret_salt_2026';
+
+export function signJwt(payload: { userId: number; email: string }): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  const body = Buffer.from(JSON.stringify({ ...payload, iat: now, exp: now + 30 * 86400 })).toString('base64url');
+  const signature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
+  return `${header}.${body}.${signature}`;
+}
+
+export function verifyJwt(token: string): { userId: number; email: string } | null {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [header, body, signature] = parts;
+  const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
+  if (signature !== expectedSig) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf-8'));
+    const now = Math.floor(Date.now() / 1000);
+    if (parsed.exp && parsed.exp < now) return null;
+    if (!parsed.userId) return null;
+    return { userId: Number(parsed.userId), email: String(parsed.email) };
+  } catch {
+    return null;
+  }
 }
 
 // Simple password hashing helper
 export function hashPassword(password: string): string {
   const salt = 'globetrotter_salt_2026';
   return crypto.scryptSync(password, salt, 32).toString('hex');
+}
+
+export function generateInviteCode(): string {
+  return 'GT-' + crypto.randomBytes(3).toString('hex').toUpperCase();
 }
 
 export function generateSlug(name: string): string {
@@ -367,14 +468,24 @@ export const dbOps = {
 
   // Trip operations
   getTripsByUser(userId: number) {
+    const user = this.getUserById(userId);
+    const userEmail = user?.email || '';
+
     const trips = db.prepare(`
       SELECT t.*,
         (SELECT COUNT(*) FROM stops WHERE trip_id = t.id) as destinations_count,
-        (SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE trip_id = t.id) as total_spent
+        (SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE trip_id = t.id) as total_spent,
+        (CASE 
+          WHEN t.user_id = ? THEN 'owner' 
+          ELSE COALESCE((SELECT role FROM trip_members WHERE trip_id = t.id AND (user_id = ? OR email = ?) LIMIT 1), 'editor')
+        END) as user_role
       FROM trips t
       WHERE t.user_id = ?
+         OR t.id IN (
+           SELECT trip_id FROM trip_members WHERE user_id = ? OR email = ?
+         )
       ORDER BY t.start_date DESC
-    `).all(userId) as any[];
+    `).all(userId, userId, userEmail, userId, userId, userEmail) as any[];
 
     // Include stops for preview
     for (const trip of trips) {
@@ -390,7 +501,7 @@ export const dbOps = {
 
   getTripById(id: number) {
     const trip = db.prepare(`
-      SELECT t.*, u.name as user_name,
+      SELECT t.*, u.name as user_name, u.email as user_email,
         (SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE trip_id = t.id) as total_spent
       FROM trips t
       JOIN users u ON t.user_id = u.id
@@ -398,6 +509,12 @@ export const dbOps = {
     `).get(id) as any;
 
     if (!trip) return null;
+
+    // Ensure trip has an invite code
+    if (!trip.invite_code) {
+      trip.invite_code = generateInviteCode();
+      db.prepare('UPDATE trips SET invite_code = ? WHERE id = ?').run(trip.invite_code, trip.id);
+    }
 
     // Get stops with their activities
     const stops = db.prepare(`
@@ -417,10 +534,24 @@ export const dbOps = {
       LEFT JOIN stops s ON e.stop_id = s.id
       WHERE e.trip_id = ?
       ORDER BY e.date ASC, e.id DESC
-    `).all(id);
+    `).all(id) as any[];
+
+    for (const exp of expenses) {
+      if (typeof exp.splits === 'string') {
+        try {
+          exp.splits = JSON.parse(exp.splits);
+        } catch {
+          exp.splits = [];
+        }
+      }
+    }
+
+    // Get members
+    const members = this.getTripMembers(id);
 
     trip.stops = stops;
     trip.expenses = expenses;
+    trip.members = members;
     trip.destinations_count = stops.length;
     return trip;
   },
@@ -433,16 +564,28 @@ export const dbOps = {
 
   createTrip(userId: number, data: { name: string; start_date: string; end_date: string; description?: string; cover_image?: string; budget_total?: number; is_public?: boolean }) {
     const slug = generateSlug(data.name);
+    const inviteCode = generateInviteCode();
     const cover = data.cover_image || 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=80';
     const budget = data.budget_total || 0;
     const isPublic = data.is_public ? 1 : 0;
 
     const res = db.prepare(`
-      INSERT INTO trips (user_id, name, start_date, end_date, description, cover_image, budget_total, is_public, public_slug)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, data.name, data.start_date, data.end_date, data.description || '', cover, budget, isPublic, slug);
+      INSERT INTO trips (user_id, name, start_date, end_date, description, cover_image, budget_total, is_public, public_slug, invite_code)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, data.name, data.start_date, data.end_date, data.description || '', cover, budget, isPublic, slug, inviteCode);
 
-    return this.getTripById(Number(res.lastInsertRowid));
+    const newTripId = Number(res.lastInsertRowid);
+
+    // Auto-add trip creator to trip_members as owner
+    const creator = this.getUserById(userId);
+    if (creator) {
+      db.prepare(`
+        INSERT INTO trip_members (trip_id, user_id, email, name, role, status)
+        VALUES (?, ?, ?, ?, 'owner', 'accepted')
+      `).run(newTripId, userId, creator.email, creator.name);
+    }
+
+    return this.getTripById(newTripId);
   },
 
   updateTrip(id: number, data: { name?: string; start_date?: string; end_date?: string; description?: string; cover_image?: string; budget_total?: number; is_public?: boolean }) {
@@ -639,11 +782,135 @@ export const dbOps = {
     return true;
   },
 
-  // Expense operations
-  createExpense(data: { trip_id: number; stop_id?: number | null; title: string; category: string; amount: number; currency?: string; date: string; paid_by?: string; notes?: string }) {
+  // Trip Member Operations
+  getTripMembers(tripId: number) {
+    const trip = db.prepare('SELECT user_id FROM trips WHERE id = ?').get(tripId) as any;
+    if (!trip) return [];
+
+    const members = db.prepare(`
+      SELECT tm.*, u.photo_url
+      FROM trip_members tm
+      LEFT JOIN users u ON tm.user_id = u.id
+      WHERE tm.trip_id = ?
+      ORDER BY tm.role = 'owner' DESC, tm.created_at ASC
+    `).all(tripId) as any[];
+
+    // Ensure owner is present
+    const hasOwner = members.some(m => m.role === 'owner' || m.user_id === trip.user_id);
+    if (!hasOwner) {
+      const owner = this.getUserById(trip.user_id);
+      if (owner) {
+        members.unshift({
+          id: 0,
+          trip_id: tripId,
+          user_id: owner.id,
+          email: owner.email,
+          name: owner.name,
+          role: 'owner',
+          status: 'accepted',
+          photo_url: owner.photo_url,
+          created_at: new Date().toISOString(),
+        });
+      }
+    }
+
+    return members;
+  },
+
+  addTripMember(tripId: number, data: { email: string; name?: string; role?: string; invited_by?: number }) {
+    const trimmedEmail = data.email.toLowerCase().trim();
+    const existing = db.prepare('SELECT id FROM trip_members WHERE trip_id = ? AND email = ?').get(tripId, trimmedEmail) as any;
+    if (existing) {
+      return db.prepare('SELECT * FROM trip_members WHERE id = ?').get(existing.id) as any;
+    }
+
+    // Check if registered user
+    const regUser = this.getUserByEmail(trimmedEmail);
+    const userId = regUser ? regUser.id : null;
+    const displayName = data.name?.trim() || (regUser ? regUser.name : trimmedEmail.split('@')[0]);
+
     const res = db.prepare(`
-      INSERT INTO expenses (trip_id, stop_id, title, category, amount, currency, date, paid_by, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO trip_members (trip_id, user_id, email, name, role, status, invited_by)
+      VALUES (?, ?, ?, ?, ?, 'accepted', ?)
+    `).run(tripId, userId, trimmedEmail, displayName, data.role || 'editor', data.invited_by || null);
+
+    return db.prepare('SELECT * FROM trip_members WHERE id = ?').get(Number(res.lastInsertRowid)) as any;
+  },
+
+  removeTripMember(tripId: number, memberId: number) {
+    db.prepare('DELETE FROM trip_members WHERE id = ? AND trip_id = ?').run(memberId, tripId);
+    return true;
+  },
+
+  getTripByInviteCode(inviteCode: string) {
+    const code = inviteCode.trim().toUpperCase();
+    const trip = db.prepare('SELECT id FROM trips WHERE invite_code = ?').get(code) as any;
+    if (!trip) return null;
+    return this.getTripById(trip.id);
+  },
+
+  joinTripByInviteCode(inviteCode: string, userId: number) {
+    const code = inviteCode.trim().toUpperCase();
+    const trip = db.prepare('SELECT id, user_id, name FROM trips WHERE invite_code = ?').get(code) as any;
+    if (!trip) return null;
+
+    const user = this.getUserById(userId);
+    if (!user) return null;
+
+    // Check if user is already owner
+    if (trip.user_id === userId) {
+      return this.getTripById(trip.id);
+    }
+
+    // Check if already a member
+    const existing = db.prepare('SELECT id FROM trip_members WHERE trip_id = ? AND (user_id = ? OR email = ?)').get(trip.id, userId, user.email) as any;
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO trip_members (trip_id, user_id, email, name, role, status)
+        VALUES (?, ?, ?, ?, 'editor', 'accepted')
+      `).run(trip.id, userId, user.email, user.name);
+    } else {
+      db.prepare('UPDATE trip_members SET user_id = ?, name = ? WHERE id = ?').run(userId, user.name, existing.id);
+    }
+
+    return this.getTripById(trip.id);
+  },
+
+  isUserAllowedTrip(tripId: number, userId: number): boolean {
+    const trip = db.prepare('SELECT user_id, is_public FROM trips WHERE id = ?').get(tripId) as any;
+    if (!trip) return false;
+    if (trip.user_id === userId) return true;
+
+    const user = this.getUserById(userId);
+    const userEmail = user?.email || '';
+
+    const member = db.prepare(`
+      SELECT id FROM trip_members
+      WHERE trip_id = ? AND (user_id = ? OR email = ?)
+    `).get(tripId, userId, userEmail);
+
+    return !!member;
+  },
+
+  // Expense operations
+  createExpense(data: {
+    trip_id: number;
+    stop_id?: number | null;
+    title: string;
+    category: string;
+    amount: number;
+    currency?: string;
+    date: string;
+    paid_by?: string;
+    paid_by_user_id?: number | null;
+    split_type?: string;
+    splits?: any[] | string;
+    notes?: string;
+  }) {
+    const splitsStr = typeof data.splits === 'string' ? data.splits : JSON.stringify(data.splits || []);
+    const res = db.prepare(`
+      INSERT INTO expenses (trip_id, stop_id, title, category, amount, currency, date, paid_by, paid_by_user_id, split_type, splits, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       data.trip_id,
       data.stop_id || null,
@@ -653,19 +920,42 @@ export const dbOps = {
       data.currency || 'INR',
       data.date,
       data.paid_by || '',
+      data.paid_by_user_id || null,
+      data.split_type || 'equal',
+      splitsStr,
       data.notes || ''
     );
 
-    return db.prepare('SELECT * FROM expenses WHERE id = ?').get(Number(res.lastInsertRowid)) as any;
+    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(Number(res.lastInsertRowid)) as any;
+    if (typeof expense.splits === 'string') {
+      try { expense.splits = JSON.parse(expense.splits); } catch { expense.splits = []; }
+    }
+    return expense;
   },
 
-  updateExpense(id: number, data: { stop_id?: number | null; title?: string; category?: string; amount?: number; currency?: string; date?: string; paid_by?: string; notes?: string }) {
+  updateExpense(id: number, data: {
+    stop_id?: number | null;
+    title?: string;
+    category?: string;
+    amount?: number;
+    currency?: string;
+    date?: string;
+    paid_by?: string;
+    paid_by_user_id?: number | null;
+    split_type?: string;
+    splits?: any[] | string;
+    notes?: string;
+  }) {
     const cur = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id) as any;
     if (!cur) return null;
 
+    const splitsStr = data.splits !== undefined
+      ? (typeof data.splits === 'string' ? data.splits : JSON.stringify(data.splits))
+      : cur.splits;
+
     db.prepare(`
       UPDATE expenses
-      SET stop_id = ?, title = ?, category = ?, amount = ?, currency = ?, date = ?, paid_by = ?, notes = ?
+      SET stop_id = ?, title = ?, category = ?, amount = ?, currency = ?, date = ?, paid_by = ?, paid_by_user_id = ?, split_type = ?, splits = ?, notes = ?
       WHERE id = ?
     `).run(
       data.stop_id !== undefined ? data.stop_id : cur.stop_id,
@@ -675,11 +965,18 @@ export const dbOps = {
       data.currency ?? cur.currency,
       data.date ?? cur.date,
       data.paid_by ?? cur.paid_by,
+      data.paid_by_user_id !== undefined ? data.paid_by_user_id : cur.paid_by_user_id,
+      data.split_type ?? cur.split_type,
+      splitsStr,
       data.notes ?? cur.notes,
       id
     );
 
-    return db.prepare('SELECT * FROM expenses WHERE id = ?').get(id) as any;
+    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id) as any;
+    if (typeof expense.splits === 'string') {
+      try { expense.splits = JSON.parse(expense.splits); } catch { expense.splits = []; }
+    }
+    return expense;
   },
 
   deleteExpense(id: number) {
@@ -705,6 +1002,246 @@ export const dbOps = {
     `).all(tripId) as { date: string; day_total: number }[];
 
     return { breakdown, totalSpent, dailyExpenses };
+  },
+
+  // Settlements & Debt Simplification
+  createSettlement(data: {
+    trip_id: number;
+    from_user_id?: number | null;
+    from_name: string;
+    to_user_id?: number | null;
+    to_name: string;
+    amount: number;
+    currency?: string;
+    date: string;
+    notes?: string;
+  }) {
+    const res = db.prepare(`
+      INSERT INTO settlements (trip_id, from_user_id, from_name, to_user_id, to_name, amount, currency, date, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      data.trip_id,
+      data.from_user_id || null,
+      data.from_name.trim(),
+      data.to_user_id || null,
+      data.to_name.trim(),
+      data.amount,
+      data.currency || 'INR',
+      data.date,
+      data.notes || ''
+    );
+    return db.prepare('SELECT * FROM settlements WHERE id = ?').get(Number(res.lastInsertRowid)) as any;
+  },
+
+  deleteSettlement(id: number) {
+    db.prepare('DELETE FROM settlements WHERE id = ?').run(id);
+    return true;
+  },
+
+  getSettlements(tripId: number) {
+    return db.prepare(`
+      SELECT * FROM settlements WHERE trip_id = ? ORDER BY date DESC, id DESC
+    `).all(tripId) as any[];
+  },
+
+  getTripBalances(tripId: number) {
+    const trip = this.getTripById(tripId);
+    if (!trip) return null;
+
+    const members = this.getTripMembers(tripId);
+    const expenses = trip.expenses || [];
+    const settlements = this.getSettlements(tripId);
+
+    interface MemberBalance {
+      id?: number;
+      user_id?: number;
+      name: string;
+      email: string;
+      role: string;
+      photo_url?: string;
+      totalPaid: number;
+      totalOwed: number;
+      netBalance: number;
+    }
+
+    const memberMap = new Map<string, MemberBalance>();
+
+    for (const m of members) {
+      const key = m.name.toLowerCase().trim();
+      memberMap.set(key, {
+        id: m.id,
+        user_id: m.user_id,
+        name: m.name,
+        email: m.email,
+        role: m.role,
+        photo_url: m.photo_url,
+        totalPaid: 0,
+        totalOwed: 0,
+        netBalance: 0,
+      });
+    }
+
+    // Ensure trip owner is registered in memberMap
+    if (trip.user_name && !memberMap.has(trip.user_name.toLowerCase().trim())) {
+      memberMap.set(trip.user_name.toLowerCase().trim(), {
+        user_id: trip.user_id,
+        name: trip.user_name,
+        email: trip.user_email || '',
+        role: 'owner',
+        totalPaid: 0,
+        totalOwed: 0,
+        netBalance: 0,
+      });
+    }
+
+    const memberList = Array.from(memberMap.values());
+    const memberCount = Math.max(1, memberList.length);
+
+    let totalExpenses = 0;
+    for (const exp of expenses) {
+      const amt = Number(exp.amount) || 0;
+      totalExpenses += amt;
+
+      // Credit payer
+      const payerName = (exp.paid_by || trip.user_name || 'Traveler').trim();
+      let payer = memberMap.get(payerName.toLowerCase());
+      if (!payer && exp.paid_by_user_id) {
+        payer = memberList.find(m => m.user_id === exp.paid_by_user_id);
+      }
+      if (payer) {
+        payer.totalPaid += amt;
+      } else {
+        const newPayer: MemberBalance = {
+          name: payerName,
+          email: '',
+          role: 'editor',
+          totalPaid: amt,
+          totalOwed: 0,
+          netBalance: 0,
+        };
+        memberMap.set(payerName.toLowerCase(), newPayer);
+        memberList.push(newPayer);
+      }
+
+      // Debit participants
+      const splitType = exp.split_type || 'equal';
+      let splits: any[] = [];
+      if (Array.isArray(exp.splits)) {
+        splits = exp.splits;
+      } else if (typeof exp.splits === 'string') {
+        try { splits = JSON.parse(exp.splits); } catch { splits = []; }
+      }
+
+      if (splits.length > 0) {
+        if (splitType === 'equal') {
+          const share = amt / splits.length;
+          for (const s of splits) {
+            const sName = (s.name || '').toLowerCase().trim();
+            const target = memberMap.get(sName) || memberList.find(m => m.user_id && m.user_id === s.userId);
+            if (target) target.totalOwed += share;
+          }
+        } else if (splitType === 'exact') {
+          for (const s of splits) {
+            const sName = (s.name || '').toLowerCase().trim();
+            const target = memberMap.get(sName) || memberList.find(m => m.user_id && m.user_id === s.userId);
+            if (target) target.totalOwed += Number(s.amount) || 0;
+          }
+        } else if (splitType === 'percent') {
+          for (const s of splits) {
+            const sName = (s.name || '').toLowerCase().trim();
+            const target = memberMap.get(sName) || memberList.find(m => m.user_id && m.user_id === s.userId);
+            if (target) {
+              const pct = Number(s.percent ?? s.amount) || 0;
+              target.totalOwed += (amt * pct) / 100;
+            }
+          }
+        }
+      } else {
+        // Equal split among all known members
+        const share = amt / memberCount;
+        for (const m of memberList) {
+          m.totalOwed += share;
+        }
+      }
+    }
+
+    // Base net balance
+    for (const m of memberList) {
+      m.netBalance = m.totalPaid - m.totalOwed;
+    }
+
+    // Adjust for settlements
+    for (const st of settlements) {
+      const fromName = (st.from_name || '').toLowerCase().trim();
+      const toName = (st.to_name || '').toLowerCase().trim();
+      const sAmt = Number(st.amount) || 0;
+
+      const fromMem = memberMap.get(fromName) || memberList.find(m => m.user_id && m.user_id === st.from_user_id);
+      const toMem = memberMap.get(toName) || memberList.find(m => m.user_id && m.user_id === st.to_user_id);
+
+      if (fromMem) fromMem.netBalance += sAmt;
+      if (toMem) toMem.netBalance -= sAmt;
+    }
+
+    // Rounding
+    for (const m of memberList) {
+      m.totalPaid = Math.round(m.totalPaid * 100) / 100;
+      m.totalOwed = Math.round(m.totalOwed * 100) / 100;
+      m.netBalance = Math.round(m.netBalance * 100) / 100;
+    }
+
+    // Simplified debts algorithm
+    interface SimplifiedDebt {
+      fromName: string;
+      fromUserId?: number;
+      toName: string;
+      toUserId?: number;
+      amount: number;
+    }
+
+    const debtors = memberList
+      .filter(m => m.netBalance < -0.5)
+      .map(m => ({ name: m.name, userId: m.user_id, amount: Math.abs(m.netBalance) }))
+      .sort((a, b) => b.amount - a.amount);
+
+    const creditors = memberList
+      .filter(m => m.netBalance > 0.5)
+      .map(m => ({ name: m.name, userId: m.user_id, amount: m.netBalance }))
+      .sort((a, b) => b.amount - a.amount);
+
+    const simplifiedDebts: SimplifiedDebt[] = [];
+    let dIdx = 0;
+    let cIdx = 0;
+
+    while (dIdx < debtors.length && cIdx < creditors.length) {
+      const debtor = debtors[dIdx];
+      const creditor = creditors[cIdx];
+
+      const settleAmt = Math.min(debtor.amount, creditor.amount);
+      if (settleAmt >= 0.5) {
+        simplifiedDebts.push({
+          fromName: debtor.name,
+          fromUserId: debtor.userId,
+          toName: creditor.name,
+          toUserId: creditor.userId,
+          amount: Math.round(settleAmt),
+        });
+      }
+
+      debtor.amount -= settleAmt;
+      creditor.amount -= settleAmt;
+
+      if (debtor.amount < 0.5) dIdx++;
+      if (creditor.amount < 0.5) cIdx++;
+    }
+
+    return {
+      tripId,
+      totalExpenses,
+      members: memberList,
+      simplifiedDebts,
+      settlements,
+    };
   },
 
   // Catalog search
