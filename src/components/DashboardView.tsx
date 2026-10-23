@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Sparkles, MapPin, Calendar, IndianRupee, ArrowRight, Compass, ShieldAlert, Award, Globe2, ChevronRight, PieChart, Sparkle, Navigation, Layers, ShieldCheck, CheckCircle2, SlidersHorizontal } from 'lucide-react';
+import { Plus, Sparkles, MapPin, Calendar, IndianRupee, ArrowRight, Compass, ShieldAlert, Award, Globe2, ChevronRight, PieChart, Sparkle, Navigation, Layers, ShieldCheck, CheckCircle2, SlidersHorizontal, CloudSun, CloudRain, Film, Heart, Bell } from 'lucide-react';
 import { Trip, User } from '../types/travel';
 import { BudgetMeter } from './BudgetMeter';
 import { DestinationScopeModal } from './DestinationScopeModal';
@@ -13,6 +13,9 @@ interface DashboardViewProps {
   onExploreDestination: (city: string, scope?: 'national' | 'international') => void;
   activeScope?: 'national' | 'international';
   onScopeChange?: (scope: 'national' | 'international') => void;
+  onNavigateTab?: (tab: string) => void;
+  onOpenDisruptionReplanner?: () => void;
+  onOpenNotificationCenter?: () => void;
 }
 
 const NATIONAL_RECOMMENDED_DESTINATIONS = [
@@ -114,6 +117,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onExploreDestination,
   activeScope,
   onScopeChange,
+  onNavigateTab,
+  onOpenDisruptionReplanner,
+  onOpenNotificationCenter,
 }) => {
   const [internalScope, setInternalScope] = useState<'national' | 'international'>(activeScope || 'national');
   const scope = activeScope || internalScope;
@@ -302,6 +308,105 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Smart Travel Hub Grid */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 font-serif-heading">Smart Travel Hub</h2>
+            <p className="text-xs text-slate-500">Live weather forecasts, AI replanners, emergency SOS, place reels, and verified guides</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
+          {/* Weather & Packing */}
+          <button
+            onClick={() => onNavigateTab ? onNavigateTab('weather') : (trips[0] && onSelectTrip(trips[0], 'weather'))}
+            className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-sky-400 hover:shadow-md transition-all text-left flex flex-col justify-between group cursor-pointer"
+          >
+            <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <CloudSun className="w-5 h-5" />
+            </div>
+            <div className="mt-3">
+              <span className="text-xs font-bold text-slate-900 block group-hover:text-sky-600">Weather & Packing</span>
+              <span className="text-[11px] text-slate-500 line-clamp-1">Open-Meteo & checklist</span>
+            </div>
+          </button>
+
+          {/* Safety & SOS */}
+          <button
+            onClick={() => onNavigateTab ? onNavigateTab('safety') : (trips[0] && onSelectTrip(trips[0], 'safety'))}
+            className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-rose-400 hover:shadow-md transition-all text-left flex flex-col justify-between group cursor-pointer"
+          >
+            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div className="mt-3">
+              <span className="text-xs font-bold text-slate-900 block group-hover:text-rose-600">Safety & SOS</span>
+              <span className="text-[11px] text-slate-500 line-clamp-1">Hospitals & offline SOS</span>
+            </div>
+          </button>
+
+          {/* Disruption Replanner */}
+          <button
+            onClick={() => {
+              if (onOpenDisruptionReplanner) onOpenDisruptionReplanner();
+              else if (onNavigateTab) onNavigateTab('itinerary');
+            }}
+            className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-amber-400 hover:shadow-md transition-all text-left flex flex-col justify-between group cursor-pointer"
+          >
+            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <CloudRain className="w-5 h-5" />
+            </div>
+            <div className="mt-3">
+              <span className="text-xs font-bold text-slate-900 block group-hover:text-amber-600">Delay Replanner</span>
+              <span className="text-[11px] text-slate-500 line-clamp-1">Simulate rain & delays</span>
+            </div>
+          </button>
+
+          {/* Place Reels */}
+          <button
+            onClick={() => onNavigateTab && onNavigateTab('reels')}
+            className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-pink-400 hover:shadow-md transition-all text-left flex flex-col justify-between group cursor-pointer"
+          >
+            <div className="w-10 h-10 rounded-xl bg-pink-50 text-pink-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <Film className="w-5 h-5" />
+            </div>
+            <div className="mt-3">
+              <span className="text-xs font-bold text-slate-900 block group-hover:text-pink-600">Place Reels</span>
+              <span className="text-[11px] text-slate-500 line-clamp-1">Swipe & add to trip</span>
+            </div>
+          </button>
+
+          {/* Verified Guides */}
+          <button
+            onClick={() => onNavigateTab && onNavigateTab('guides')}
+            className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-emerald-400 hover:shadow-md transition-all text-left flex flex-col justify-between group cursor-pointer"
+          >
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <Award className="w-5 h-5" />
+            </div>
+            <div className="mt-3">
+              <span className="text-xs font-bold text-slate-900 block group-hover:text-emerald-600">Local Guides</span>
+              <span className="text-[11px] text-slate-500 line-clamp-1">Verified locals & tours</span>
+            </div>
+          </button>
+
+          {/* Wishlist & Recap */}
+          <button
+            onClick={() => onNavigateTab && onNavigateTab('wishlist')}
+            className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-indigo-400 hover:shadow-md transition-all text-left flex flex-col justify-between group cursor-pointer"
+          >
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <Heart className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div className="mt-3">
+              <span className="text-xs font-bold text-slate-900 block group-hover:text-indigo-600">Wishlist & Recap</span>
+              <span className="text-[11px] text-slate-500 line-clamp-1">Savings goal & summary</span>
+            </div>
+          </button>
         </div>
       </div>
 

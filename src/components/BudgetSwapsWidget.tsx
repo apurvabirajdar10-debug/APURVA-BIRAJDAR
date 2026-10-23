@@ -65,9 +65,12 @@ export const BudgetSwapsWidget: React.FC<BudgetSwapsWidgetProps> = ({
   const spendRatio = totalSpent / budgetTotal;
   const isNearOrOverBudget = spendRatio >= 0.75;
 
-  // Find candidate activities in the trip that cost > ₹1,800 to propose swaps
+  // Find candidate activities in the trip that can be swapped for cheaper alternatives
   const activities = trip.stops?.flatMap(s => (s.activities || []).map(a => ({ ...a, stopId: s.id }))) || [];
-  const expensiveActivities = activities.filter(a => a.cost >= 1800);
+  const sortedActivities = [...activities].sort((a, b) => b.cost - a.cost);
+  const expensiveActivities = sortedActivities.filter(a => a.cost >= 700).length > 0
+    ? sortedActivities.filter(a => a.cost >= 700)
+    : sortedActivities.filter(a => a.cost >= 350);
 
   // Generate budget swap suggestions
   const suggestions: BudgetSwapSuggestion[] = [];

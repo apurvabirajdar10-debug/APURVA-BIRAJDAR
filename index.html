@@ -4,19 +4,104 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
-      // Vite HMR is disabled in AI Studio preview.
-      // Suppress Vite client's WebSocket connection rejection as instructed by environment constraints.
-      window.addEventListener('unhandledrejection', function (event) {
-        var reason = event && event.reason;
-        var msg = (reason && (reason.message || String(reason))) || '';
-        var stack = (reason && reason.stack) || '';
-        if (
-          msg.indexOf('WebSocket closed without opened') !== -1 ||
-          (msg.indexOf('WebSocket') !== -1 && stack.indexOf('@vite/client') !== -1)
-        ) {
-          event.preventDefault();
+      // Vite HMR is disabled in AI Studio cloud preview environment.
+      // Filter out benign dev-server WebSocket reconnection notices so false-positive banners do not appear.
+      (function () {
+        // 1. Intercept console.error for Vite HMR WebSocket messages
+        var origConsoleError = console.error;
+        console.error = function () {
+          var args = Array.prototype.slice.call(arguments);
+          var text = args.map(function (arg) {
+            if (!arg) return '';
+            if (arg instanceof Error) return (arg.message || '') + ' ' + (arg.stack || '');
+            return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+          }).join(' ');
+
+          if (
+            text.indexOf('WebSocket closed without opened') !== -1 ||
+            (text.indexOf('[vite]') !== -1 && text.indexOf('WebSocket') !== -1)
+          ) {
+            return;
+          }
+          return origConsoleError.apply(console, arguments);
+        };
+
+        // 2. Suppress unhandledrejection & window error events
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = event && event.reason;
+          var msg = (reason && (reason.message || String(reason))) || '';
+          var stack = (reason && reason.stack) || '';
+          if (
+            msg.indexOf('WebSocket closed without opened') !== -1 ||
+            (msg.indexOf('WebSocket') !== -1 && stack.indexOf('@vite/client') !== -1)
+          ) {
+            event.preventDefault();
+          }
+        });
+
+        window.addEventListener('error', function (event) {
+          var msg = (event && (event.message || '')) || '';
+          var filename = (event && (event.filename || '')) || '';
+          if (
+            msg.indexOf('WebSocket closed without opened') !== -1 ||
+            (msg.indexOf('WebSocket') !== -1 && filename.indexOf('@vite/client') !== -1)
+          ) {
+            event.preventDefault();
+            return true;
+          }
+        });
+
+        // 3. Stub Vite-HMR WebSocket connections so dev client doesn't retry in headless proxy
+        var NativeWebSocket = window.WebSocket;
+        if (typeof NativeWebSocket === 'function') {
+          window.WebSocket = function (url, protocols) {
+            var isHmr = false;
+            if (typeof protocols === 'string' && protocols.indexOf('vite-hmr') !== -1) isHmr = true;
+            if (Array.isArray(protocols) && protocols.indexOf('vite-hmr') !== -1) isHmr = true;
+            if (typeof url === 'string' && (url.indexOf('vite-hmr') !== -1 || isHmr)) {
+              var target = new EventTarget();
+              var stub = {
+                url: url,
+                protocol: 'vite-hmr',
+                readyState: 1, // OPEN
+                binaryType: 'blob',
+                bufferedAmount: 0,
+                send: function () {},
+                close: function () {
+                  stub.readyState = 3;
+                },
+                addEventListener: function (type, listener, options) {
+                  target.addEventListener(type, listener, options);
+                  if (type === 'open') {
+                    setTimeout(function () {
+                      try {
+                        listener.call(stub, new Event('open'));
+                      } catch (e) {}
+                    }, 0);
+                  }
+                },
+                removeEventListener: function (type, listener, options) {
+                  target.removeEventListener(type, listener, options);
+                },
+                dispatchEvent: function (event) {
+                  return target.dispatchEvent(event);
+                },
+                onopen: null,
+                onmessage: null,
+                onerror: null,
+                onclose: null,
+              };
+              return stub;
+            }
+            return new NativeWebSocket(url, protocols);
+          };
+          window.WebSocket.prototype = NativeWebSocket.prototype;
+          window.WebSocket.CONNECTING = 0;
+          window.WebSocket.OPEN = 1;
+          window.WebSocket.CLOSING = 2;
+          window.WebSocket.CLOSED = 3;
         }
-      });
+      })();
     </script>
     <title>Remix Globe Trotter</title>
     <meta name="description" content="Intelligent multi-city travel planning platform with relational database, day-wise itineraries, budget breakdown, and AI travel assistant." />

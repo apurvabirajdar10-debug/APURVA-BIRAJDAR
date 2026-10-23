@@ -28,7 +28,9 @@ import {
   Building,
   Ticket,
   Calculator,
-  Users
+  Users,
+  CloudRain,
+  Sun
 } from 'lucide-react';
 import { Trip, Stop, Activity } from '../types/travel';
 import { api } from '../lib/api';
@@ -41,6 +43,8 @@ interface ItineraryDisplayViewProps {
   onOpenOptimizer: () => void;
   onOpenBuilder: () => void;
   onOpenChat: () => void;
+  onOpenDisruptionReplanner?: () => void;
+  onOpenWeather?: () => void;
 }
 
 export const ItineraryDisplayView: React.FC<ItineraryDisplayViewProps> = ({
@@ -49,6 +53,8 @@ export const ItineraryDisplayView: React.FC<ItineraryDisplayViewProps> = ({
   onOpenOptimizer,
   onOpenBuilder,
   onOpenChat,
+  onOpenDisruptionReplanner,
+  onOpenWeather,
 }) => {
   const [viewMode, setViewMode] = useState<'timeline' | 'calendar' | 'list'>('timeline');
   const [selectedCityFilter, setSelectedCityFilter] = useState<string>('all');
@@ -310,6 +316,28 @@ export const ItineraryDisplayView: React.FC<ItineraryDisplayViewProps> = ({
             <Sparkles className="w-3.5 h-3.5 text-violet-600" />
             <span>Chat Assistant</span>
           </button>
+
+          {onOpenDisruptionReplanner && (
+            <button
+              onClick={onOpenDisruptionReplanner}
+              className="min-h-[44px] px-3.5 py-2 rounded-xl bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200 text-xs font-semibold shadow-2xs flex items-center space-x-1.5 transition-all cursor-pointer"
+              title="Simulate delay or bad weather and generate Gemini revised contingency plan"
+            >
+              <CloudRain className="w-3.5 h-3.5 text-amber-600" />
+              <span>Simulate Delay/Rain</span>
+            </button>
+          )}
+
+          {onOpenWeather && (
+            <button
+              onClick={onOpenWeather}
+              className="min-h-[44px] px-3.5 py-2 rounded-xl bg-sky-50 text-sky-800 hover:bg-sky-100 border border-sky-200 text-xs font-semibold shadow-2xs flex items-center space-x-1.5 transition-all cursor-pointer"
+              title="View daily weather forecast and checkable packing list"
+            >
+              <Sun className="w-3.5 h-3.5 text-sky-600" />
+              <span>Weather & Packing</span>
+            </button>
+          )}
         </div>
       </div>
 

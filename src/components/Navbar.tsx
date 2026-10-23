@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Compass, Sparkles, Plus, MapPin, Calendar, IndianRupee, User as UserIcon, LogOut, Menu, X, ChevronDown, ListFilter, Globe2, Ticket, Vote, Download } from 'lucide-react';
+import { Compass, Sparkles, Plus, MapPin, Calendar, IndianRupee, User as UserIcon, LogOut, Menu, X, ChevronDown, ListFilter, Globe2, Ticket, Vote, Download, Bell, CloudSun, ShieldAlert, Film, Heart, Award, CloudRain } from 'lucide-react';
 import { User, Trip } from '../types/travel';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -11,6 +11,8 @@ interface NavbarProps {
   onLogout: () => void;
   onOpenCreateTrip: () => void;
   onOpenAIAssistant: () => void;
+  onOpenNotificationCenter?: () => void;
+  onOpenDisruptionReplanner?: () => void;
   activeTrip: Trip | null;
   onSelectTrip: (trip: Trip | null) => void;
   allTrips: Trip[];
@@ -27,6 +29,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   onOpenCreateTrip,
   onOpenAIAssistant,
+  onOpenNotificationCenter,
+  onOpenDisruptionReplanner,
   activeTrip,
   onSelectTrip,
   allTrips,
@@ -109,7 +113,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <nav className="hidden lg:flex items-center space-x-1">
             <button
               onClick={() => setCurrentTab('dashboard')}
-              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-2.5 py-1.5 rounded-lg text-xs xl:text-sm font-medium transition-colors ${
                 currentTab === 'dashboard'
                   ? 'text-sky-600 bg-sky-50 font-semibold'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -119,7 +123,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
             <button
               onClick={() => setCurrentTab('trips')}
-              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-2.5 py-1.5 rounded-lg text-xs xl:text-sm font-medium transition-colors ${
                 currentTab === 'trips'
                   ? 'text-sky-600 bg-sky-50 font-semibold'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -131,98 +135,115 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Trip-specific navigation items if a trip is active */}
             {activeTrip && (
               <>
-                <div className="h-4 w-px bg-slate-200 mx-1" />
-                <button
-                  onClick={() => setCurrentTab('builder')}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-1.5 ${
-                    currentTab === 'builder'
-                      ? 'text-sky-600 bg-sky-50 font-semibold'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                  }`}
-                >
-                  <MapPin className="w-3.5 h-3.5" />
-                  <span>Stops & Builder</span>
-                </button>
+                <div className="h-4 w-px bg-slate-200 mx-0.5" />
                 <button
                   onClick={() => setCurrentTab('itinerary')}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-1.5 ${
+                  className={`px-2.5 py-1.5 rounded-lg text-xs xl:text-sm font-medium transition-colors flex items-center space-x-1 ${
                     currentTab === 'itinerary'
                       ? 'text-sky-600 bg-sky-50 font-semibold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
                   <Calendar className="w-3.5 h-3.5" />
-                  <span>Itinerary Schedule</span>
+                  <span>Itinerary</span>
                 </button>
                 <button
                   onClick={() => setCurrentTab('budget')}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-1.5 ${
+                  className={`px-2.5 py-1.5 rounded-lg text-xs xl:text-sm font-medium transition-colors flex items-center space-x-1 ${
                     currentTab === 'budget'
                       ? 'text-sky-600 bg-sky-50 font-semibold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
                   <IndianRupee className="w-3.5 h-3.5" />
-                  <span>Budget & Costs</span>
+                  <span>Budget</span>
                 </button>
                 <button
-                  onClick={() => setCurrentTab('voting')}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-1.5 ${
-                    currentTab === 'voting'
-                      ? 'text-amber-600 bg-amber-50 font-semibold'
+                  onClick={() => setCurrentTab('weather')}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs xl:text-sm font-medium transition-colors flex items-center space-x-1 ${
+                    currentTab === 'weather'
+                      ? 'text-sky-600 bg-sky-50 font-semibold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
+                  title="Day-wise forecast & packing list"
                 >
-                  <Vote className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Voting Board</span>
+                  <CloudSun className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Weather</span>
                 </button>
-                {onOpenOfflinePack && (
-                  <button
-                    onClick={onOpenOfflinePack}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors flex items-center space-x-1 cursor-pointer"
-                    title="View and download offline trip dossier"
-                  >
-                    <Download className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Offline Pack</span>
-                  </button>
-                )}
+                <button
+                  onClick={() => setCurrentTab('safety')}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs xl:text-sm font-medium transition-colors flex items-center space-x-1 ${
+                    currentTab === 'safety'
+                      ? 'text-rose-600 bg-rose-50 font-semibold'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                  }`}
+                  title="Local emergency numbers, hospitals, and offline SOS"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Safety</span>
+                </button>
               </>
             )}
 
-            <div className="h-4 w-px bg-slate-200 mx-1" />
+            <div className="h-4 w-px bg-slate-200 mx-0.5" />
+            <button
+              onClick={() => setCurrentTab('reels')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs xl:text-sm font-medium transition-colors flex items-center space-x-1 ${
+                currentTab === 'reels'
+                  ? 'text-pink-600 bg-pink-50 font-semibold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+              title="Swipe travel video & photo reels"
+            >
+              <Film className="w-3.5 h-3.5 text-pink-500" />
+              <span>Reels</span>
+            </button>
+            <button
+              onClick={() => setCurrentTab('guides')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs xl:text-sm font-medium transition-colors flex items-center space-x-1 ${
+                currentTab === 'guides'
+                  ? 'text-emerald-600 bg-emerald-50 font-semibold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+              title="Verified local destination guides"
+            >
+              <Award className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Guides</span>
+            </button>
+            <button
+              onClick={() => setCurrentTab('wishlist')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs xl:text-sm font-medium transition-colors flex items-center space-x-1 ${
+                currentTab === 'wishlist'
+                  ? 'text-rose-600 bg-rose-50 font-semibold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+              title="Savings goals & trip recaps"
+            >
+              <Heart className="w-3.5 h-3.5 text-rose-500" />
+              <span>Wishlist</span>
+            </button>
             <button
               onClick={() => setCurrentTab('search')}
-              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-1.5 ${
+              className={`px-2.5 py-1.5 rounded-lg text-xs xl:text-sm font-medium transition-colors flex items-center space-x-1 ${
                 currentTab === 'search'
                   ? 'text-sky-600 bg-sky-50 font-semibold'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
               }`}
             >
               <Globe2 className="w-3.5 h-3.5 text-sky-600" />
-              <span>Browse Global Catalog</span>
-            </button>
-            <button
-              onClick={() => setCurrentTab('bookings')}
-              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-1.5 ${
-                currentTab === 'bookings'
-                  ? 'text-sky-600 bg-sky-50 font-semibold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-              }`}
-            >
-              <Ticket className="w-3.5 h-3.5 text-amber-500" />
-              <span>Bookings</span>
+              <span>Catalog</span>
             </button>
           </nav>
 
           {/* Right Action Buttons */}
-          <div className="hidden sm:flex items-center space-x-2.5">
+          <div className="hidden sm:flex items-center space-x-2">
             {/* Global Scope Switcher Pill */}
             {onScopeChange && (
               <div className="flex items-center p-1 rounded-xl bg-slate-100 border border-slate-200 text-xs">
                 <button
                   type="button"
                   onClick={() => onScopeChange('national')}
-                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer flex items-center space-x-1 ${
+                  className={`px-2 py-1 rounded-lg font-semibold transition-all cursor-pointer flex items-center space-x-1 ${
                     scope === 'national'
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-500 hover:text-slate-800'
@@ -230,13 +251,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title="Filter to destinations within India"
                 >
                   <span>🇮🇳</span>
-                  <span className="hidden xl:inline">National (India)</span>
-                  <span className="xl:hidden">India</span>
+                  <span className="hidden 2xl:inline">India</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => onScopeChange('international')}
-                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer flex items-center space-x-1 ${
+                  className={`px-2 py-1 rounded-lg font-semibold transition-all cursor-pointer flex items-center space-x-1 ${
                     scope === 'international'
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-500 hover:text-slate-800'
@@ -244,10 +264,36 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title="Filter to international destinations outside India"
                 >
                   <span>🌐</span>
-                  <span className="hidden xl:inline">International</span>
-                  <span className="xl:hidden">Global</span>
+                  <span className="hidden 2xl:inline">Global</span>
                 </button>
               </div>
+            )}
+
+            {/* Disruption Replanner Quick Trigger (if activeTrip) */}
+            {activeTrip && onOpenDisruptionReplanner && (
+              <button
+                type="button"
+                onClick={onOpenDisruptionReplanner}
+                className="hidden xl:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-medium transition-colors cursor-pointer"
+                title="Simulate delay or rain to test AI replanner"
+              >
+                <CloudRain className="w-3.5 h-3.5 text-amber-600" />
+                <span>Simulate Delay</span>
+              </button>
+            )}
+
+            {/* Notification Center Trigger */}
+            {onOpenNotificationCenter && (
+              <button
+                type="button"
+                onClick={onOpenNotificationCenter}
+                className="relative p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                title="Notification Center (Alerts, flight status, quiet hours)"
+                aria-label="Notification Center"
+              >
+                <Bell className="w-4 h-4 text-slate-600" />
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white animate-pulse" />
+              </button>
             )}
 
             {/* AI Assistant Quick Trigger */}
@@ -265,7 +311,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Plan New Trip CTA */}
             <button
               onClick={onOpenCreateTrip}
-              className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-sm shadow-sky-600/20 active:scale-95 transition-all cursor-pointer"
+              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-sm shadow-sky-600/20 active:scale-95 transition-all cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New Trip</span>
@@ -336,7 +382,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Mobile hamburger */}
-          <div className="flex items-center space-x-2 lg:hidden">
+          <div className="flex items-center space-x-1.5 lg:hidden">
+            {onOpenNotificationCenter && (
+              <button
+                onClick={onOpenNotificationCenter}
+                className="relative p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                title="Notifications"
+                aria-label="Notification Center"
+              >
+                <Bell className="w-5 h-5 text-slate-600" />
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+              </button>
+            )}
             <button
               onClick={onOpenAIAssistant}
               className="p-2 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
@@ -421,23 +478,23 @@ export const Navbar: React.FC<NavbarProps> = ({
               <>
                 <button
                   onClick={() => {
-                    setCurrentTab('builder');
-                    setMobileMenuOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
-                >
-                  <MapPin className="w-4 h-4 text-sky-600" />
-                  <span>Stops & Builder ({activeTrip.name})</span>
-                </button>
-                <button
-                  onClick={() => {
                     setCurrentTab('itinerary');
                     setMobileMenuOpen(false);
                   }}
                   className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
                 >
                   <Calendar className="w-4 h-4 text-sky-600" />
-                  <span>Itinerary Schedule</span>
+                  <span>Itinerary Schedule ({activeTrip.name})</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setCurrentTab('builder');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
+                >
+                  <MapPin className="w-4 h-4 text-sky-600" />
+                  <span>Stops & Route Builder</span>
                 </button>
                 <button
                   onClick={() => {
@@ -447,8 +504,40 @@ export const Navbar: React.FC<NavbarProps> = ({
                   className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
                 >
                   <IndianRupee className="w-4 h-4 text-sky-600" />
-                  <span>Budget & Costs</span>
+                  <span>Budget, Swaps & Costs</span>
                 </button>
+                <button
+                  onClick={() => {
+                    setCurrentTab('weather');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
+                >
+                  <CloudSun className="w-4 h-4 text-amber-500" />
+                  <span>Weather & Checkable Packing</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setCurrentTab('safety');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
+                >
+                  <ShieldAlert className="w-4 h-4 text-rose-500" />
+                  <span>Safety Hub & Offline SOS</span>
+                </button>
+                {onOpenDisruptionReplanner && (
+                  <button
+                    onClick={() => {
+                      onOpenDisruptionReplanner();
+                      setMobileMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 flex items-center space-x-2"
+                  >
+                    <CloudRain className="w-4 h-4 text-amber-600" />
+                    <span>Simulate Delay / Rain (Replanner)</span>
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setCurrentTab('voting');
@@ -475,12 +564,43 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
             <button
               onClick={() => {
+                setCurrentTab('reels');
+                setMobileMenuOpen(false);
+              }}
+              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
+            >
+              <Film className="w-4 h-4 text-pink-500" />
+              <span>Place Reels & Videos</span>
+            </button>
+            <button
+              onClick={() => {
+                setCurrentTab('guides');
+                setMobileMenuOpen(false);
+              }}
+              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
+            >
+              <Award className="w-4 h-4 text-emerald-600" />
+              <span>Verified Local Guides</span>
+            </button>
+            <button
+              onClick={() => {
+                setCurrentTab('wishlist');
+                setMobileMenuOpen(false);
+              }}
+              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
+            >
+              <Heart className="w-4 h-4 text-rose-500" />
+              <span>Wishlist & Trip Recaps</span>
+            </button>
+            <button
+              onClick={() => {
                 setCurrentTab('search');
                 setMobileMenuOpen(false);
               }}
-              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100"
+              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
             >
-              Browse Global Catalog & 3D Globe
+              <Globe2 className="w-4 h-4 text-sky-600" />
+              <span>Browse Catalog & 3D Globe</span>
             </button>
             <button
               onClick={() => {
@@ -490,16 +610,29 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
             >
               <Ticket className="w-4 h-4 text-amber-500" />
-              <span>Bookings (Transit, Stays & Attractions)</span>
+              <span>Bookings Concierge</span>
             </button>
+            {onOpenNotificationCenter && (
+              <button
+                onClick={() => {
+                  onOpenNotificationCenter();
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
+              >
+                <Bell className="w-4 h-4 text-slate-600" />
+                <span>Notification Settings & Alerts</span>
+              </button>
+            )}
             <button
               onClick={() => {
                 setCurrentTab('profile');
                 setMobileMenuOpen(false);
               }}
-              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100"
+              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center space-x-2"
             >
-              Profile & Preferences
+              <UserIcon className="w-4 h-4 text-slate-600" />
+              <span>Profile & Preferences</span>
             </button>
           </div>
 

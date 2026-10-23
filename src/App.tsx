@@ -19,6 +19,13 @@ import { TripMembersModal } from './components/TripMembersModal';
 import { VotingBoardView } from './components/VotingBoardView';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { OfflinePackModal } from './components/OfflinePackModal';
+import { WeatherPackingView } from './components/WeatherPackingView';
+import { SafetyView } from './components/SafetyView';
+import { ReelFeedView } from './components/ReelFeedView';
+import { WishlistRecapView } from './components/WishlistRecapView';
+import { VerifiedGuidesView } from './components/VerifiedGuidesView';
+import { NotificationCenterModal } from './components/NotificationCenterModal';
+import { DisruptionReplannerModal } from './components/DisruptionReplannerModal';
 import { Trip, User } from './types/travel';
 import { api, clearAuthToken, setAuthToken } from './lib/api';
 
@@ -39,6 +46,8 @@ export default function App() {
   const [tripMembersModalOpen, setTripMembersModalOpen] = useState(false);
   const [tripForMembers, setTripForMembers] = useState<Trip | null>(null);
   const [offlinePackModalOpen, setOfflinePackModalOpen] = useState(false);
+  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  const [disruptionReplannerOpen, setDisruptionReplannerOpen] = useState(false);
 
   // Discovery / Catalog search filter hint
   const [catalogSearchHint, setCatalogSearchHint] = useState<string>('');
@@ -243,6 +252,8 @@ export default function App() {
           setCreateTripModalOpen(true);
         }}
         onOpenAIAssistant={() => setAiAssistantModalOpen(true)}
+        onOpenNotificationCenter={() => setNotificationCenterOpen(true)}
+        onOpenDisruptionReplanner={() => setDisruptionReplannerOpen(true)}
         activeTrip={activeTrip}
         onSelectTrip={(t) => handleSelectTrip(t)}
         allTrips={trips}
@@ -282,6 +293,9 @@ export default function App() {
             onOpenAIAssistant={() => setAiAssistantModalOpen(true)}
             onSelectTrip={(t, tab) => handleSelectTrip(t, tab)}
             onExploreDestination={handleExploreDestination}
+            onNavigateTab={(tab) => setCurrentTab(tab)}
+            onOpenDisruptionReplanner={() => setDisruptionReplannerOpen(true)}
+            onOpenNotificationCenter={() => setNotificationCenterOpen(true)}
           />
         )}
 
@@ -340,6 +354,8 @@ export default function App() {
               onOpenOptimizer={() => setOptimizerModalOpen(true)}
               onOpenBuilder={() => setCurrentTab('builder')}
               onOpenChat={() => setChatDrawerOpen(true)}
+              onOpenDisruptionReplanner={() => setDisruptionReplannerOpen(true)}
+              onOpenWeather={() => setCurrentTab('weather')}
             />
           ) : (
             <div className="p-12 text-center bg-white rounded-3xl border border-dashed border-slate-300 space-y-3">
@@ -444,6 +460,66 @@ export default function App() {
             </div>
           )
         )}
+
+        {/* VIEW 11: WEATHER FORECAST & AUTO-GENERATED CHECKABLE PACKING LIST */}
+        {currentTab === 'weather' && (
+          activeTrip || trips.length > 0 ? (
+            <WeatherPackingView
+              trip={activeTrip || trips[0]}
+              onTripUpdated={handleTripUpdated}
+              onOpenDisruptionReplanner={() => setDisruptionReplannerOpen(true)}
+            />
+          ) : (
+            <div className="p-12 text-center bg-white rounded-3xl border border-dashed border-slate-300 space-y-3">
+              <p className="text-sm font-semibold text-slate-700">Please select or create a trip to view weather and packing checklist.</p>
+              <button
+                onClick={() => setCurrentTab('trips')}
+                className="px-4 py-2 bg-sky-600 text-white rounded-xl text-xs font-semibold"
+              >
+                Go to My Trips
+              </button>
+            </div>
+          )
+        )}
+
+        {/* VIEW 12: SAFETY, EMERGENCY NUMBERS, HOSPITAL FINDER & OFFLINE SOS */}
+        {currentTab === 'safety' && (
+          <SafetyView
+            trip={activeTrip || trips[0] || null}
+            user={user}
+          />
+        )}
+
+        {/* VIEW 13: SWIPEABLE TRAVEL REEL FEED */}
+        {currentTab === 'reels' && (
+          <ReelFeedView
+            trips={trips}
+            activeTrip={activeTrip}
+            onTripUpdated={handleTripUpdated}
+            onNavigateToBuilder={() => setCurrentTab('builder')}
+          />
+        )}
+
+        {/* VIEW 14: DESTINATION WISHLIST & TRIP RECAP */}
+        {currentTab === 'wishlist' && (
+          <WishlistRecapView
+            trips={trips}
+            activeTrip={activeTrip}
+            user={user}
+            onTripCreated={handleTripCreated}
+            onSelectTrip={(t, tab) => handleSelectTrip(t, tab)}
+          />
+        )}
+
+        {/* VIEW 15: VERIFIED LOCAL GUIDES */}
+        {currentTab === 'guides' && (
+          <VerifiedGuidesView
+            trips={trips}
+            activeTrip={activeTrip}
+            onTripUpdated={handleTripUpdated}
+            onNavigateToBuilder={() => setCurrentTab('builder')}
+          />
+        )}
       </main>
 
       {/* Floating Conversational Trip Assistant */}
@@ -489,6 +565,28 @@ export default function App() {
           isOpen={optimizerModalOpen}
           onClose={() => setOptimizerModalOpen(false)}
           trip={activeTrip}
+        />
+      )}
+
+      {/* Notification Center Modal */}
+      <NotificationCenterModal
+        isOpen={notificationCenterOpen}
+        onClose={() => setNotificationCenterOpen(false)}
+        trips={trips}
+        activeTrip={activeTrip}
+        onNavigateTab={(tab) => {
+          setCurrentTab(tab);
+          setNotificationCenterOpen(false);
+        }}
+      />
+
+      {/* Disruption Replanner Modal */}
+      {disruptionReplannerOpen && (activeTrip || trips[0]) && (
+        <DisruptionReplannerModal
+          isOpen={disruptionReplannerOpen}
+          onClose={() => setDisruptionReplannerOpen(false)}
+          trip={activeTrip || trips[0]}
+          onTripUpdated={handleTripUpdated}
         />
       )}
 
