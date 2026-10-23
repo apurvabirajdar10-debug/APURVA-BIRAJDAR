@@ -3,6 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Vite HMR is disabled in AI Studio preview.
+      // Suppress Vite client's WebSocket connection rejection as instructed by environment constraints.
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event && event.reason;
+        var msg = (reason && (reason.message || String(reason))) || '';
+        var stack = (reason && reason.stack) || '';
+        if (
+          msg.indexOf('WebSocket closed without opened') !== -1 ||
+          (msg.indexOf('WebSocket') !== -1 && stack.indexOf('@vite/client') !== -1)
+        ) {
+          event.preventDefault();
+        }
+      });
+    </script>
     <title>Remix Globe Trotter</title>
     <meta name="description" content="Intelligent multi-city travel planning platform with relational database, day-wise itineraries, budget breakdown, and AI travel assistant." />
     <meta property="og:title" content="Remix Globe Trotter" />

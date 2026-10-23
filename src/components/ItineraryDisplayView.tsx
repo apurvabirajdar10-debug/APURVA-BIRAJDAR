@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -26,10 +26,14 @@ import {
   Compass,
   AlertCircle,
   Building,
-  Ticket
+  Ticket,
+  Calculator,
+  Users
 } from 'lucide-react';
 import { Trip, Stop, Activity } from '../types/travel';
 import { api } from '../lib/api';
+import { ExpenseSplitterModal } from './ExpenseSplitterModal';
+import { SetBudgetModal } from './SetBudgetModal';
 
 interface ItineraryDisplayViewProps {
   trip: Trip;
@@ -53,6 +57,20 @@ export const ItineraryDisplayView: React.FC<ItineraryDisplayViewProps> = ({
   const [showExportModal, setShowExportModal] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedSummary, setCopiedSummary] = useState(false);
+  const [showExpenseSplitterModal, setShowExpenseSplitterModal] = useState(false);
+  const [showSetBudgetModal, setShowSetBudgetModal] = useState(false);
+
+  // Retrieve saved member count for this specific itinerary
+  const savedMemberCount = useMemo(() => {
+    try {
+      const saved = localStorage.getItem(`gt_expense_splitter_members_${trip.id}`);
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (parsed >= 1 && parsed <= 50) return parsed;
+      }
+    } catch (e) {}
+    return 2;
+  }, [trip.id, showExpenseSplitterModal]);
 
   // Generate an array of all distinct dates across the trip
   const stops = trip.stops || [];
@@ -218,12 +236,22 @@ export const ItineraryDisplayView: React.FC<ItineraryDisplayViewProps> = ({
           </p>
         </div>
 
-        {/* View Mode Switcher, Export to PDF, and Actions */}
+        {/* View Mode Switcher, Export to PDF, Expense Splitter, and Actions */}
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* Expense Splitter Button */}
+          <button
+            onClick={() => setShowExpenseSplitterModal(true)}
+            className="min-h-[44px] px-3.5 py-2 rounded-xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 text-xs font-semibold shadow-2xs flex items-center space-x-1.5 transition-all cursor-pointer"
+            title="Open Expense Splitter for this itinerary"
+          >
+            <Calculator className="w-4 h-4 text-emerald-600" />
+            <span>Expense Splitter</span>
+          </button>
+
           {/* Prominent Export to PDF / Share Button (Requirement 5) */}
           <button
             onClick={() => setShowExportModal(true)}
-            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer"
+            className="min-h-[44px] px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer"
             title="Export to PDF or Share complete Trip Itinerary"
           >
             <FileDown className="w-4 h-4 text-sky-400" />
@@ -283,6 +311,50 @@ export const ItineraryDisplayView: React.FC<ItineraryDisplayViewProps> = ({
             <span>Chat Assistant</span>
           </button>
         </div>
+      </div>
+
+      {/* Itinerary Expense Splitter Card */}
+      <div className="bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-sky-500/10 border border-emerald-200/90 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+        <div className="flex items-center space-x-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+            <Users className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">
+                Itinerary Expense Splitter
+              </span>
+              <span className="text-xs text-slate-500 font-medium">
+                Split by {savedMemberCount} {savedMemberCount === 1 ? 'Member' : 'Members'}
+              </span>
+            </div>
+            <div className="flex items-baseline space-x-2 mt-0.5">
+              <span className="text-xl font-bold font-serif-heading text-slate-900">
+                {trip.budget_total > 0
+                  ? `₹${(trip.budget_total / savedMemberCount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / person`
+                  : 'Add a budget to this itinerary to split expenses.'}
+              </span>
+              {trip.budget_total > 0 && (
+                <span className="text-xs text-slate-500">
+                  (Total Budget: ₹{trip.budget_total.toLocaleString('en-IN')})
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {trip.budget_total > 0
+                ? `Calculated evenly for ${trip.name} with instant remainder balancing.`
+                : 'Set a total budget to see instant per-person splits.'}
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => setShowExpenseSplitterModal(true)}
+          className="min-h-[44px] px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-sm flex items-center justify-center space-x-2 transition-all cursor-pointer self-start sm:self-center shrink-0"
+        >
+          <Calculator className="w-4 h-4" />
+          <span>Open Splitter</span>
+        </button>
       </div>
 
       {/* Sub-toolbar: City Filter & Expand/Collapse */}
@@ -830,6 +902,24 @@ export const ItineraryDisplayView: React.FC<ItineraryDisplayViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Expense Splitter Modal */}
+      <ExpenseSplitterModal
+        isOpen={showExpenseSplitterModal}
+        onClose={() => setShowExpenseSplitterModal(false)}
+        trip={trip}
+        onOpenSetBudget={() => setShowSetBudgetModal(true)}
+      />
+
+      {/* Set Budget Modal shortcut */}
+      {showSetBudgetModal && onTripUpdated && (
+        <SetBudgetModal
+          isOpen={showSetBudgetModal}
+          onClose={() => setShowSetBudgetModal(false)}
+          trip={trip}
+          onTripUpdated={onTripUpdated}
+        />
       )}
     </div>
   );

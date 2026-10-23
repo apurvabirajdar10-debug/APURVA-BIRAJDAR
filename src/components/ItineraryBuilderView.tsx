@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Sparkles, MapPin, Calendar, Clock, IndianRupee, ArrowUp, ArrowDown, Trash2, Edit3, Train, Plane, Car, Bus, Ship, Check, AlertCircle, ChevronDown, ChevronUp, Eye, Compass, BookOpen, X, Globe, RotateCcw, ArrowRight, CheckCircle2, Users } from 'lucide-react';
+import { Plus, Sparkles, MapPin, Calendar, Clock, IndianRupee, ArrowUp, ArrowDown, Trash2, Edit3, Train, Plane, Car, Bus, Ship, Check, AlertCircle, ChevronDown, ChevronUp, Eye, Compass, BookOpen, X, Globe, RotateCcw, ArrowRight, CheckCircle2, Users, Calculator } from 'lucide-react';
 import { Trip, Stop, Activity } from '../types/travel';
 import { api } from '../lib/api';
 import { DestinationScopeModal } from './DestinationScopeModal';
+import { ExpenseSplitterModal } from './ExpenseSplitterModal';
 import { GLOBE_CITIES, GlobeCity } from '../data/globeCities';
 import { getDistributedAttractionsForCity, CuratedAttraction, getCuratedAttractionsForCity } from '../data/cityAttractions';
 
@@ -25,6 +26,7 @@ export const ItineraryBuilderView: React.FC<ItineraryBuilderViewProps> = ({
 }) => {
   const [showAddStopModal, setShowAddStopModal] = useState(false);
   const [stopToEdit, setStopToEdit] = useState<Stop | null>(null);
+  const [showExpenseSplitterModal, setShowExpenseSplitterModal] = useState(false);
 
   // Scope selection state: 'national' vs 'international'
   const [scopeModalOpen, setScopeModalOpen] = useState(false);
@@ -449,6 +451,14 @@ export const ItineraryBuilderView: React.FC<ItineraryBuilderViewProps> = ({
               <span>Trip Members ({trip.members?.length || 1})</span>
             </button>
           )}
+          <button
+            onClick={() => setShowExpenseSplitterModal(true)}
+            className="min-h-[44px] px-3.5 py-2.5 rounded-xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200/80 text-xs font-semibold shadow-2xs flex items-center space-x-1.5 transition-all cursor-pointer"
+            title="Open Expense Splitter for this itinerary"
+          >
+            <Calculator className="w-4 h-4 text-emerald-600" />
+            <span>Expense Splitter</span>
+          </button>
           <button
             onClick={onOpenOptimizer}
             className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white text-xs font-semibold shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer"
@@ -1466,6 +1476,13 @@ export const ItineraryBuilderView: React.FC<ItineraryBuilderViewProps> = ({
         onClose={() => setScopeModalOpen(false)}
         title="Where are you traveling?"
         description="Choose whether to add a National (India) or International destination to your itinerary."
+      />
+
+      {/* Expense Splitter Modal */}
+      <ExpenseSplitterModal
+        isOpen={showExpenseSplitterModal}
+        onClose={() => setShowExpenseSplitterModal(false)}
+        trip={trip}
       />
     </div>
   );
