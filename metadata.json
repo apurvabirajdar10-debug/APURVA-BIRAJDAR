@@ -1,0 +1,8 @@
+{
+  "name": "Remix Globe Trotter",
+  "description": "Intelligent multi-city travel planning platform with relational database, day-wise itineraries, budget breakdown, and AI travel assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
