@@ -418,7 +418,7 @@ export interface VerifiedGuide {
   curatedSpots: {
     title: string;
     description: string;
-    category: 'sightseeing' | 'food' | 'culture' | 'adventure';
+    category: 'sightseeing' | 'food' | 'culture' | 'adventure' | 'relaxation' | 'shopping';
     cost: number;
     durationHours: number;
     timeSlot: 'morning' | 'afternoon' | 'evening';

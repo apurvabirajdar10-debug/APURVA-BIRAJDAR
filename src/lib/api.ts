@@ -129,6 +129,18 @@ export const api = {
       body: JSON.stringify(activityData),
     }),
 
+  createActivity: (stopIdOrTripId: number, activityData: Partial<Activity>) => {
+    const tripId = activityData.trip_id || stopIdOrTripId;
+    const body = {
+      ...activityData,
+      stop_id: activityData.stop_id || stopIdOrTripId,
+    };
+    return request<{ activity: Activity; trip: Trip; message: string }>(`/trips/${tripId}/activities`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
   updateActivity: (activityId: number, activityData: Partial<Activity>) =>
     request<{ activity: Activity; trip: Trip; message: string }>(`/activities/${activityId}`, {
       method: 'PUT',
